@@ -345,20 +345,18 @@ AP_DECLARE(apr_status_t) ap_check_pipeline(conn_rec *c, apr_bucket_brigade *bb,
     return rv;
 }
 
-
 AP_DECLARE(void) ap_process_request_after_handler(request_rec *r)
 {
     apr_bucket_brigade *bb;
     apr_bucket *b;
     conn_rec *c = r->connection;
-    apr_status_t rv;
     ap_filter_t *f;
 
     /* Send an EOR bucket through the output filter chain.  When
      * this bucket is destroyed, the request will be logged and
      * its pool will be freed
      */
-    bb = apr_brigade_create(c->pool, c->bucket_alloc);
+    bb = ap_reuse_brigade_from_pool("ap_prah_bb", c->pool, c->bucket_alloc);
     b = ap_bucket_eor_create(c->bucket_alloc, r);
     APR_BRIGADE_INSERT_HEAD(bb, b);
 
@@ -400,13 +398,22 @@ AP_DECLARE(void) ap_process_request_after_handler(request_rec *r)
      * without flushing data, and hence possibly delay pending response(s)
      * until the next/real request comes in or the keepalive timeout expires.
      */
-    rv = ap_check_pipeline(c, bb, DEFAULT_LIMIT_BLANK_LINES);
-    c->data_in_input_filters = (rv == APR_SUCCESS);
-    apr_brigade_destroy(bb);
+    (void)ap_check_pipeline(c, bb, DEFAULT_LIMIT_BLANK_LINES);
+    apr_brigade_cleanup(bb);
 
-    if (c->cs)
-        c->cs->state = (c->aborted) ? CONN_STATE_LINGER
-                                    : CONN_STATE_WRITE_COMPLETION;
+    if (c->cs) {
+        if (c->aborted) {
+            c->cs->state = CONN_STATE_LINGER;
+        }
+        else {
+            /* If we have still data in the output filters here it means that
+             * the last (recent) nonblocking write was EAGAIN, so tell the MPM
+             * to not try another useless/stressful one but to go straight to
+             * POLLOUT.
+            */
+            c->cs->state = CONN_STATE_WRITE_COMPLETION;
+        }
+    }
     AP_PROCESS_REQUEST_RETURN((uintptr_t)r, r->uri, r->status);
     if (ap_extended_status) {
         ap_time_process_request(c->sbh, STOP_PREQUEST);
@@ -495,8 +502,8 @@ AP_DECLARE(void) ap_process_request(request_rec *r)
 
     ap_process_async_request(r);
 
-    if (!c->data_in_input_filters || ap_run_input_pending(c) != OK) {
-        bb = apr_brigade_create(c->pool, c->bucket_alloc);
+    if (ap_run_input_pending(c) != OK) {
+        bb = ap_reuse_brigade_from_pool("ap_pr_bb", c->pool, c->bucket_alloc);
         b = apr_bucket_flush_create(c->bucket_alloc);
         APR_BRIGADE_INSERT_HEAD(bb, b);
         rv = ap_pass_brigade(c->output_filters, bb);
@@ -509,6 +516,7 @@ AP_DECLARE(void) ap_process_request(request_rec *r)
             ap_log_cerror(APLOG_MARK, APLOG_INFO, rv, c, APLOGNO(01581)
                           "flushing data to the client");
         }
+        apr_brigade_cleanup(bb);
     }
     if (ap_extended_status) {
         ap_time_process_request(c->sbh, STOP_PREQUEST);

@@ -1163,10 +1163,6 @@ struct conn_rec {
     struct apr_bucket_alloc_t *bucket_alloc;
     /** The current state of this connection; may be NULL if not used by MPM */
     conn_state_t *cs;
-    /** Is there data pending in the input filters or connection? */
-    int data_in_input_filters;
-    /** No longer used, replaced with ap_filter_should_yield() */
-    int data_in_output_filters;
 
     /** Are there any filters that clogg/buffer the input stream, breaking
      *  the event mpm.
@@ -1221,11 +1217,8 @@ struct conn_rec {
     /** Array of requests being handled under this connection. */
     apr_array_header_t *requests;
 
-    /** Empty bucket brigade */
-    apr_bucket_brigade *empty;
-
-    /** Hashtable of filters with setaside buckets for write completion */
-    apr_hash_t *filters;
+    /** Ring of pending filters (with setaside buckets) */
+    struct ap_filter_ring *pending_filters;
 
     /** The minimum level of filter type to allow setaside buckets */
     int async_filter;
@@ -2194,6 +2187,19 @@ AP_DECLARE(int) ap_request_has_body(request_rec *r);
 AP_DECLARE(int) ap_request_tainted(request_rec *r, int flags);
 
 /**
+ * Reuse a brigade from a pool, or create it on the given pool/alloc and
+ * associate it with the given key for further reuse.
+ *
+ * @param key the key/id of the brigade
+ * @param pool the pool to cache and create the brigade from
+ * @param alloc the bucket allocator to be used by the brigade
+ * @return the reused and cleaned up brigade, or a new one
+ */
+AP_DECLARE(apr_bucket_brigade *) ap_reuse_brigade_from_pool(const char *key,
+                                                            apr_pool_t *pool,
+                                                    apr_bucket_alloc_t *alloc);
+
+/**
  * Cleanup a string (mainly to be filesystem safe)
  * We only allow '_' and alphanumeric chars. Non-printable
  * map to 'x' and all others map to '_'
@@ -2531,7 +2537,7 @@ AP_DECLARE(int) ap_array_str_contains(const apr_array_header_t *array,
                                       const char *s);
 
 /**
- * Perform a case-insensitive comparison of two strings @a atr1 and @a atr2,
+ * Perform a case-insensitive comparison of two strings @a str1 and @a str2,
  * treating upper and lower case values of the 26 standard C/POSIX alphabetic
  * characters as equivalent. Extended latin characters outside of this set
  * are treated as unique octets, irrespective of the current locale.
@@ -2545,7 +2551,7 @@ AP_DECLARE(int) ap_array_str_contains(const apr_array_header_t *array,
 AP_DECLARE(int) ap_cstr_casecmp(const char *s1, const char *s2);
 
 /**
- * Perform a case-insensitive comparison of two strings @a atr1 and @a atr2,
+ * Perform a case-insensitive comparison of two strings @a str1 and @a str2,
  * treating upper and lower case values of the 26 standard C/POSIX alphabetic
  * characters as equivalent. Extended latin characters outside of this set
  * are treated as unique octets, irrespective of the current locale.

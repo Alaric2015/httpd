@@ -132,13 +132,12 @@
         SSL_CTX_ctrl(ctx, SSL_CTRL_SET_MIN_PROTO_VERSION, version, NULL)
 #define SSL_CTX_set_max_proto_version(ctx, version) \
         SSL_CTX_ctrl(ctx, SSL_CTRL_SET_MAX_PROTO_VERSION, version, NULL)
-#elif LIBRESSL_VERSION_NUMBER < 0x2070000f
+#endif /* LIBRESSL_VERSION_NUMBER < 0x2060000f */
 /* LibreSSL before 2.7 declares OPENSSL_VERSION_NUMBER == 2.0 but does not
  * include most changes from OpenSSL >= 1.1 (new functions, macros, 
  * deprecations, ...), so we have to work around this...
  */
-#define MODSSL_USE_OPENSSL_PRE_1_1_API (1)
-#endif /* LIBRESSL_VERSION_NUMBER < 0x2060000f */
+#define MODSSL_USE_OPENSSL_PRE_1_1_API (LIBRESSL_VERSION_NUMBER < 0x2080000f)
 #else /* defined(LIBRESSL_VERSION_NUMBER) */
 #define MODSSL_USE_OPENSSL_PRE_1_1_API (OPENSSL_VERSION_NUMBER < 0x10100000L)
 #endif
@@ -782,13 +781,7 @@ struct SSLDirConfigRec {
     BOOL          proxy_post_config;
 };
 
-typedef struct SSLPolicyRec SSLPolicyRec;
-struct SSLPolicyRec {
-    const char *name;
-    SSLSrvConfigRec *sc;
-};
-
-SSLPolicyRec *ssl_policy_lookup(apr_pool_t *pool, const char *name);
+SSLSrvConfigRec *ssl_policy_lookup(apr_pool_t *pool, const char *name);
 
 /**
  *  function prototypes
@@ -997,21 +990,28 @@ BOOL         ssl_util_vhost_matches(const char *servername, server_rec *s);
 apr_status_t ssl_load_encrypted_pkey(server_rec *, apr_pool_t *, int,
                                      const char *, apr_array_header_t **);
 
+/* Load public and/or private key from the configured ENGINE. Private
+ * key returned as *pkey.  certid can be NULL, in which case *pubkey
+ * is not altered.  Errors logged on failure. */
+apr_status_t modssl_load_engine_keypair(server_rec *s, apr_pool_t *p,
+                                        const char *vhostid,
+                                        const char *certid, const char *keyid,
+                                        X509 **pubkey, EVP_PKEY **privkey);
+
 /**  Diffie-Hellman Parameter Support  */
 DH           *ssl_dh_GetParamFromFile(const char *);
 #ifdef HAVE_ECC
 EC_GROUP     *ssl_ec_GetParamFromFile(const char *);
 #endif
 
-unsigned char *ssl_asn1_table_set(apr_hash_t *table,
-                                  const char *key,
-                                  long int length);
-
-ssl_asn1_t *ssl_asn1_table_get(apr_hash_t *table,
-                               const char *key);
-
-void ssl_asn1_table_unset(apr_hash_t *table,
-                          const char *key);
+/* Store the EVP_PKEY key (serialized into DER) in the hash table with
+ * key, returning the ssl_asn1_t structure pointer. */
+ssl_asn1_t *ssl_asn1_table_set(apr_hash_t *table, const char *key,
+                               EVP_PKEY *pkey);
+/* Retrieve the ssl_asn1_t structure with given key from the hash. */
+ssl_asn1_t *ssl_asn1_table_get(apr_hash_t *table, const char *key);
+/* Remove and free the ssl_asn1_t structure with given key. */
+void ssl_asn1_table_unset(apr_hash_t *table, const char *key);
 
 /**  Mutex Support  */
 int          ssl_mutex_init(server_rec *, apr_pool_t *);
@@ -1100,6 +1100,10 @@ DH *modssl_get_dh_params(unsigned keylen);
  * is non-NULL and the request is using SSL/TLS, sets *sslconn to the
  * corresponding SSLConnRec structure for the connection. */
 int modssl_request_is_tls(const request_rec *r, SSLConnRec **sslconn);
+
+/* Returns non-zero if the cert/key filename should be handled through
+ * the configured ENGINE. */
+int modssl_is_engine_id(const char *name);
 
 #if HAVE_VALGRIND
 extern int ssl_running_on_valgrind;

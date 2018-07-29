@@ -598,8 +598,8 @@ AP_DECLARE(void) ap_no2slash(char *name)
  * MODIFIED FOR HAVE_DRIVE_LETTERS and NETWARE environments,
  * so that if n == 0, "/" is returned in d with n == 1
  * and s == "e:/test.html", "e:/" is returned in d
- * *** See also directory_walk in modules/http/http_request.c
-
+ * *** See also ap_directory_walk in server/request.c
+ *
  * examples:
  *    /a/b, 0  ==> /  (true for all platforms)
  *    /a/b, 1  ==> /
@@ -2675,6 +2675,22 @@ AP_DECLARE_NONSTD(apr_status_t) ap_pool_cleanup_set_null(void *data_)
     return APR_SUCCESS;
 }
 
+AP_DECLARE(apr_bucket_brigade *) ap_reuse_brigade_from_pool(const char *key,
+                                                            apr_pool_t *pool,
+                                                    apr_bucket_alloc_t *alloc)
+{
+    apr_bucket_brigade *bb = NULL;
+    apr_pool_userdata_get((void **)&bb, key, pool);
+    if (bb == NULL) {
+        bb = apr_brigade_create(pool, alloc);
+        apr_pool_userdata_set(bb, key, NULL, pool);
+    }
+    else {
+        apr_brigade_cleanup(bb);
+    }
+    return bb;
+}
+
 AP_DECLARE(apr_status_t) ap_str2_alnum(const char *src, char *dest) {
 
     for ( ; *src; src++, dest++)
@@ -2849,12 +2865,11 @@ AP_DECLARE(int) ap_parse_form_data(request_rec *r, ap_filter_t *f,
                     case FORM_NAME:
                         if (offset < HUGE_STRING_LEN) {
                             if ('=' == c) {
-                                buffer[offset] = 0;
-                                offset = 0;
                                 pair = (ap_form_pair_t *) apr_array_push(pairs);
-                                pair->name = apr_pstrdup(r->pool, buffer);
+                                pair->name = apr_pstrmemdup(r->pool, buffer, offset);
                                 pair->value = apr_brigade_create(r->pool, r->connection->bucket_alloc);
                                 state = FORM_VALUE;
+                                offset = 0;
                             }
                             else {
                                 buffer[offset++] = c;

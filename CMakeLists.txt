@@ -651,7 +651,6 @@ SET(LIBHTTPD_SOURCES
   modules/http/byterange_filter.c
   modules/http/chunk_filter.c
   modules/http/http_core.c
-  modules/http/http_etag.c
   modules/http/http_filters.c
   modules/http/http_protocol.c
   modules/http/http_request.c
@@ -680,6 +679,7 @@ SET(LIBHTTPD_SOURCES
   server/util_cfgtree.c
   server/util_cookies.c
   server/util_debug.c
+  server/util_etag.c
   server/util_expr_eval.c
   server/util_expr_parse.c
   server/util_fcgi.c
@@ -709,6 +709,7 @@ SET(HTTPD_INCLUDE_DIRECTORIES
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/dav/main
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/filters
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/generators
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/http2
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/md
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/proxy
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/session
@@ -733,6 +734,7 @@ SET(other_installed_h
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/filters/mod_xml2enc.h
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/generators/mod_cgi.h
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/generators/mod_status.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/http2/mod_http2.h
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/loggers/mod_log_config.h
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/mappers/mod_rewrite.h
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/proxy/mod_proxy.h

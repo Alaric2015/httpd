@@ -825,7 +825,8 @@ expressions</description>
 <name>ProxySet</name>
 <description>Set various Proxy balancer or member parameters</description>
 <syntax>ProxySet <var>url</var> <var>key=value [key=value ...]</var></syntax>
-<contextlist><context>directory</context>
+<contextlist><context>server config</context><context>virtual host</context>
+<context>directory</context>
 </contextlist>
 <usage>
     <p>This directive is used as an alternate method of setting any of the
@@ -1142,7 +1143,8 @@ ProxyPass "/example" "http://backend.example.com" max=20 ttl=120 retry=300
         <td>Adjust the size of the proxy response field buffer. The buffer size
             should be at least the size of the largest expected header size from
             a proxied response. Setting the value to 0 will use the system
-            default of 8192 bytes.
+            default of 8192 bytes.<br />
+        Available in Apache HTTP Server 2.4.34 and later.
     </td></tr>
     <tr><td>keepalive</td>
         <td>Off</td>
@@ -1214,7 +1216,7 @@ ProxyPass "/example" "http://backend.example.com" max=20 ttl=120 retry=300
         <td>Route of the worker when used inside load balancer.
         The route is a value appended to session id.
     </td></tr>
-    <tr><td>status</td>
+    <tr><td><a name="status_table">status</a></td>
         <td>-</td>
         <td>Single letter value defining the initial status of
         this worker.
@@ -1222,7 +1224,7 @@ ProxyPass "/example" "http://backend.example.com" max=20 ttl=120 retry=300
          <tr><td><code>D</code></td><td>Worker is disabled and will not accept any requests; will be
                     automatically retried.</td></tr>
          <tr><td><code>S</code></td><td>Worker is administratively stopped; will not accept requests
-                    and will not be automatically retried</td></tr>
+                    and will not be automatically retried.</td></tr>
          <tr><td><code>I</code></td><td>Worker is in ignore-errors mode and will always be considered available.</td></tr>
          <tr><td><code>R</code></td><td>Worker is a hot spare. For each worker in a given lbset that is unusable
                     (draining, stopped, in error, etc.), a usable hot spare with the same lbset will be used in
@@ -1430,15 +1432,18 @@ ProxyPass "/" "balancer://hotcluster/"
     httpd 2.4.1 and later) prevents this.</p>
 
     <p>The optional <var>interpolate</var> keyword, in combination with
-    <directive>ProxyPassInterpolateEnv</directive>, causes the ProxyPass
+    <directive module="mod_proxy">ProxyPassInterpolateEnv</directive>, causes the ProxyPass
     to interpolate environment variables, using the syntax
     <var>${VARNAME}</var>.  Note that many of the standard CGI-derived
     environment variables will not exist when this interpolation happens,
     so you may still have to resort to <module>mod_rewrite</module>
-    for complex rules.  Also note that interpolation is not supported
-    within the scheme portion of a URL.  Dynamic determination of the
-    scheme can be accomplished with <module>mod_rewrite</module> as in the
-    following example.</p>
+    for complex rules. Also note that interpolation is supported
+    within the scheme/hostname/port portion of a URL only for variables that
+    are available when the directive is parsed 
+    (like <directive module="core">Define</directive>). Dynamic determination of
+    those fields can be accomplished with <module>mod_rewrite</module>.
+    The following example describes how to use <module>mod_rewrite</module>
+    to dynamically set the scheme to http or https:</p>
 
     <highlight language="config">
 RewriteEngine On
@@ -1554,9 +1559,25 @@ proxied server</description>
     match the proxy, you must load and enable <module>mod_proxy_html</module>.
     </p>
 
-    <p><var>path</var> is the name of a local virtual path; <var>url</var> is a
-    partial URL for the remote server. These parameters are used the same way as
-    for the <directive module="mod_proxy">ProxyPass</directive> directive.</p>
+    <p><var>path</var> is the name of a local virtual path. It is combined 
+    with the requests scheme, host, and port to form the replacement 
+    prefix of the affected response header.  
+    This parameter is usually the same as the first parameter of the 
+    <directive module="mod_proxy">ProxyPass</directive> directive.
+    </p>
+
+    <p><var>url</var> is a partial URL for the remote server. When the remote
+    server sends the specifically mentioned headers beginning with this partial
+    URL, the prefix from the remote server is replaced with a prefix that
+    points to the reverse proxy.
+    This parameter is usually the same as the second parameter of the 
+    <directive module="mod_proxy">ProxyPass</directive> directive, but it may
+    differ if the remote server uses a different scheme, host, port, or path
+    in the affected headers.  In configurations with 
+    <directive module="mod_proxy">ProxyPreserveHost</directive>, the hostname
+    in the partial URL may already be the hostname of the reverse proxy, which
+    will prevent the matching and replacement done by this directive.
+    </p>
 
     <p>For example, suppose the local server has address
     <code>http://example.com/</code>; then</p>
@@ -2051,7 +2072,17 @@ header for proxied requests</description>
     and causes them to substitute the value of an environment
     variable <code>varname</code> for the string <code>${varname}</code>
     in configuration directives if the <var>interpolate</var> option is set.</p>
-    <p>Keep this turned off (for server performance) unless you need it!</p>
+    <p>The scheme/hostname/port portion of <directive>ProxyPass</directive> may
+    contain variables, but only the ones available when the directive is parsed
+    (for example, using <directive module="core">Define</directive>).
+    For all the other use cases, please consider using
+    <module>mod_rewrite</module> instead.</p>
+    <note type="warning"><title>Performance warning</title>
+    <p>Keep this turned off unless you need it!
+    Adding variables to <directive>ProxyPass</directive> for example may lead to
+    the use of the default mod_proxy's workers configured (that don't allow any fine
+    tuning like connections reuse, etc..).</p>
+    </note>
 </usage>
 </directivesynopsis>
 

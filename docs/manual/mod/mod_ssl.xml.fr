@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE modulesynopsis SYSTEM "../style/modulesynopsis.dtd">
 <?xml-stylesheet type="text/xsl" href="../style/manual.fr.xsl"?>
-<!-- English Revision: 1828238 -->
+<!-- English Revision: 1835614 -->
 <!-- French translation : Lucien GENTIS -->
 <!-- Reviewed by : Vincent Deffontaines -->
 
@@ -191,7 +191,7 @@ seul) caractérisant le DN est enregistré avec un nom sans suffixe ;
 autrement dit, aucune entrée possédant comme suffixe <code>_0</code>
 n'est enregistrée.</p>
 
-<p>Depuis la version 2.5.0 de httpd, il est possible d'ajouter le suffixe
+<p>Depuis la version 2.4.32 de httpd, il est possible d'ajouter le suffixe
 <em>_RAW</em> à <em>x509</em> dans un élément DN afin d'éviter la conversion en
 UTF-8 de la valeur de l'attribut. Il doit être placé après le suffixe index
 (s'il existe), par exemple <code>SSL_SERVER_S_DN_OU_RAW</code> ou
@@ -475,17 +475,15 @@ le PRNG est un service global.</p>
 Les différentes valeurs de <em>source</em> disponibles sont :</p>
 <ul>
 <li><code>builtin</code>
-    <p>Cette source de déclenchement intégrée est toujours disponible.
-    Son utilisation consomme un minimum de cycles CPU en cours
-    d'exécution, et son utilisation ne présente de ce fait aucun
-    problème. La source utilisée pour déclencher le PRNG contient la
-    date courante, l'identifiant du processus courant et (si disponible)
-    un extrait de 1Ko aléatoirement choisi de la structure d'Apache pour
-    les échanges inter-processus. Ceci présente un inconvénient car le
-    caractère aléatoire de cette source n'est pas vraiment fort, et au
-    démarrage (lorsque la structure d'échanges n'est pas encore
-    disponible), cette source ne produit que quelques octets d'entropie.
-    Vous devez donc toujours utiliser une source de déclenchement
+    <p>Cette source de déclenchement intégrée est toujours disponible.  Son
+    utilisation consomme un minimum de cycles CPU en cours d'exécution, et son
+    utilisation ne présente de ce fait aucun problème. La source utilisée pour
+    déclencher le PRNG contient la date courante, l'identifiant du processus
+    courant et un extrait de 128 octets aléatoirement choisi dans la pile. Ceci
+    présente un inconvénient car le caractère aléatoire de cette source n'est
+    pas vraiment fort, et au démarrage (lorsque la structure d'échanges n'est
+    pas encore disponible), cette source ne produit que quelques octets
+    d'entropie.  Vous devez donc toujours utiliser une source de déclenchement
     additionnelle, au moins pour le démarrage.</p></li>
 <li><code>file:/chemin/vers/source</code>
     <p>
@@ -675,8 +673,6 @@ SSLSessionCacheTimeout 600
 <default>SSLEngine off</default>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
-<compatibility>Le paramètre <code>addr:port</code> est disponible à partir de la
-version 2.4.30 du serveur HTTP Apache.</compatibility>
 
 <usage>
 <p> Cette directive permet d'activer/désactiver le moteur du protocole SSL/TLS.
@@ -1031,25 +1027,27 @@ SSLCipherSuite RSA:!EXP:!NULL:+HIGH:+MEDIUM:-LOW
 <directivesynopsis>
 <name>SSLCertificateFile</name>
 <description>Fichier de données contenant les informations de certificat X.509 du serveur
-codées au format PEM</description>
-<syntax>SSLCertificateFile <em>chemin-fichier</em></syntax>
+codées au format PEM ou identificateur de jeton</description>
+<syntax>SSLCertificateFile <var>file-path</var>|<var>certid</var></syntax>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
+<compatibility>L'option <var>certid</var> est disponible à partir de la version
+2.5.1 du serveur HTTP Apache.</compatibility>
 
 <usage>
 <p>
-Cette directive permet de définir le fichier de données contenant
-les informations de certificat
-X.509 du serveur codées au format PEM. Ce fichier doit contenir
-au minimum un certificat d'entité finale (feuille).
-La directive peut être utilisée plusieurs fois (elle référence des
-fichiers différents) pour accepter plusieurs algorithmes
-d'authentification au niveau du serveur - souvent RSA, DSA et ECC. Le
-nombre d'algorithmes supportés dépend de la version d'OpenSSL utilisée
-avec mod_ssl : à partir de la version 1.0.0, la commande <code>openssl
-list-public-key-algorithms</code> affiche la liste des algorithmes
-supportés. Voir aussi la note ci-dessous à propos des limitations des versions
-d'OpenSSL antérieures à 1.0.2 et la manière de les contourner.
+Cette directive permet de définir le fichier de données contenant les
+informations de certificat X.509 du serveur codées au format PEM ou
+l'identificateur de certificat via un jeton cryptographique. Si on utilise un
+fichier au format PEM, ce dernier doit contenir au minimum un certificat
+d'entité finale (feuille).  La directive peut être utilisée plusieurs fois (elle
+référence des fichiers différents) pour accepter plusieurs algorithmes
+d'authentification au niveau du serveur - souvent RSA, DSA et ECC. Le nombre
+d'algorithmes supportés dépend de la version d'OpenSSL utilisée avec mod_ssl : à
+partir de la version 1.0.0, la commande <code>openssl
+list-public-key-algorithms</code> affiche la liste des algorithmes supportés.
+Voir aussi la note ci-dessous à propos des limitations des versions d'OpenSSL
+antérieures à 1.0.2 et la manière de les contourner.
 </p>
 
 <p>Les fichiers peuvent aussi contenir des certificats de CA
@@ -1082,6 +1080,16 @@ avant les certificats en utilisant un fichier de clé séparé. En outre,
 si la clé est chiffrée, une boîte de dialogue pour entrer le mot de
 passe de la clé s'ouvre au démarrage du serveur.
 </p>
+
+<p>Plutôt que de stocker les certificats et les clés privées dans des fichiers,
+on peut utiliser un identificateur de certificat pour identifier un certificat
+stocké dans un jeton. Actuellement, seuls les <a
+href="https://tools.ietf.org/html/rfc7512">URIs PKCS#11</a> sont reconnus comme
+identificateurs de certificats et peuvent être utilisés en conjonction avec le
+moteur OpenSSL <code>pkcs11</code>. Si la directive <directive
+module="mod_ssl">SSLCertificateKeyFile</directive> est absente, le certificat et
+la clé privée peuvent être chargés avec l'identificateur spécifié via la
+directive <directive module="mod_ssl">SSLCertificateFile</directive>.</p>
 
 <note>
 <title>Interopérabilité des paramètres DH avec les nombres premiers de
@@ -1133,7 +1141,11 @@ et appropriée.
 
 <example><title>Exemple</title>
 <highlight language="config">
+# Exemple utilisant un fichier codé en PEM.
 SSLCertificateFile "/usr/local/apache2/conf/ssl.crt/server.crt"
+# Exemple d'utilisation d'un certificat et d'une clé privés issus d'un jeton
+# PKCS#11 :
+SSLCertificateFile "pkcs11:token=My%20Token%20Name;id=45"
 </highlight>
 </example>
 </usage>
@@ -1143,16 +1155,18 @@ SSLCertificateFile "/usr/local/apache2/conf/ssl.crt/server.crt"
 <name>SSLCertificateKeyFile</name>
 <description>Fichier contenant la clé privée du serveur codée en
 PEM</description>
-<syntax>SSLCertificateKeyFile <em>chemin-fichier</em></syntax>
+<syntax>SSLCertificateKeyFile <var>file-path</var>|<var>keyid</var></syntax>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
+<compatibility><var>keyid</var> est disponible à partir de la version 2.5.1 du
+serveur HTTP Apache.</compatibility>
 
 <usage>
 <p>
-Cette directive permet de définir le fichier contenant la clé privée du
-serveur codée en PEM. Si la clé privée est
-chiffrée, une boîte de dialogue demandant le mot de passe de cette
-dernière s'ouvre au démarrage du serveur.</p>
+Cette directive permet de définir le fichier contenant la clé privée du serveur
+codée en PEM ou l'identifiant de la clé via un jeton cryptographique défini. Si
+la clé privée est chiffrée, une boîte de dialogue demandant le mot de passe de
+cette dernière s'ouvre au démarrage du serveur.</p>
 
 <p>
 Cette directive peut être utilisée plusieurs fois pour référencer
@@ -1168,9 +1182,18 @@ pratique est fortement déconseillée. En effet, les fichiers de
 certificats qui comportent une telle clé doivent être définis après les
 certificats en utilisant un fichier de clé séparé.</p>
 
+<p>Plutôt que de stocker des clés privées dans des fichiers, il est possible
+d'identifier une clé privée via un identifiant stocké dans un jeton.
+Actuellement, seuls les <a href="https://tools.ietf.org/html/rfc7512">PKCS#11
+URIs</a> sont reconnus comme identifiants de clés privées et peuvent être
+utilisés en conjonction avec le moteur OpenSSL <code>pkcs11</code>.</p>
+
 <example><title>Exemple</title>
 <highlight language="config">
+# Pour utiliser une clé privée stockée dans fichier encodé PEM :
 SSLCertificateKeyFile "/usr/local/apache2/conf/ssl.key/server.key"
+# Pour utiliser une clé privée à partir d'un jeton PKCS#11 :
+SSLCertificateKeyFile "pkcs11:token=My%20Token%20Name;id=45"
 </highlight>
 </example>
 </usage>
@@ -1180,7 +1203,7 @@ SSLCertificateKeyFile "/usr/local/apache2/conf/ssl.key/server.key"
 <name>SSLCertificateChainFile</name>
 <description>Fichier contenant les certificats de CA du serveur codés en
 PEM</description>
-<syntax>SSLCertificateChainFile <em>chemin-fichier</em></syntax>
+<syntax>SSLCertificateChainFile <var>file-path</var></syntax>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
 
@@ -1264,7 +1287,7 @@ SSLCACertificatePath "/usr/local/apache2/conf/ssl.crt/"
 <name>SSLCACertificateFile</name>
 <description>Fichier contenant une concaténation des certificats de CA
 codés en PEM pour l'authentification des clients</description>
-<syntax>SSLCACertificateFile <em>chemin-fichier</em></syntax>
+<syntax>SSLCACertificateFile <var>file-path</var></syntax>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
 <override>AuthConfig</override>
@@ -1291,7 +1314,7 @@ SSLCACertificateFile "/usr/local/apache2/conf/ssl.crt/ca-bundle-client.crt"
 <name>SSLCADNRequestFile</name>
 <description>Fichier contenant la concaténation des certificats de CA
 codés en PEM pour la définition de noms de CA acceptables</description>
-<syntax>SSLCADNRequestFile <em>chemin-fichier</em></syntax>
+<syntax>SSLCADNRequestFile <var>file-path</var></syntax>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
 
@@ -1399,7 +1422,7 @@ SSLCARevocationPath "/usr/local/apache2/conf/ssl.crl/"
 <name>SSLCARevocationFile</name>
 <description>Fichier contenant la concaténation des CRLs des CA codés en
 PEM pour l'authentification des clients</description>
-<syntax>SSLCARevocationFile <em>chemin-fichier</em></syntax>
+<syntax>SSLCARevocationFile <var>file-path</var></syntax>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
 
@@ -1584,7 +1607,7 @@ SSLVerifyDepth 10
 <directivesynopsis>
 <name>SSLSRPVerifierFile</name>
 <description>Chemin du fichier de vérification SRP</description>
-<syntax>SSLSRPVerifierFile <em>file-path</em></syntax>
+<syntax>SSLSRPVerifierFile <var>file-path</var></syntax>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
 <compatibility>Disponible depuis la version 2.4.4 du serveur HTTP
@@ -2054,7 +2077,7 @@ SSLProxyMachineCertificatePath "/usr/local/apache2/conf/proxy.crt/"
 <name>SSLProxyMachineCertificateFile</name>
 <description>Fichier contenant la concaténation des clés et certificats
 clients codés en PEM que le mandataire doit utiliser</description>
-<syntax>SSLProxyMachineCertificateFile <em>chemin-fichier</em></syntax>
+<syntax>SSLProxyMachineCertificateFile <em>file-path</em></syntax>
 <contextlist><context>server config</context> <context>virtual host</context>
 <context>proxy section</context></contextlist>
 
@@ -2427,7 +2450,7 @@ SSLProxyCACertificatePath "/usr/local/apache2/conf/ssl.crt/"
 <name>SSLProxyCACertificateFile</name>
 <description>Fichier contenant la concaténation des certificats de CA
 codés en PEM pour l'authentification des serveurs distants</description>
-<syntax>SSLProxyCACertificateFile <em>file-path</em></syntax>
+<syntax>SSLProxyCACertificateFile <var>file-path</var></syntax>
 <contextlist><context>server config</context> <context>virtual host</context>
 <context>proxy section</context></contextlist>
 
@@ -2484,7 +2507,7 @@ SSLProxyCARevocationPath "/usr/local/apache2/conf/ssl.crl/"
 <name>SSLProxyCARevocationFile</name>
 <description>Fichier contenant la concaténation des CRLs de CA codés en
 PEM pour l'authentification des serveurs distants</description>
-<syntax>SSLProxyCARevocationFile <em>chemin-fichier</em></syntax>
+<syntax>SSLProxyCARevocationFile <var>file-path</var></syntax>
 <contextlist><context>server config</context> <context>virtual host</context>
 <context>proxy section</context></contextlist>
 
@@ -2646,6 +2669,8 @@ client</description>
 <default>SSLOCSPEnable off</default>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
+<compatibility>Le mode <em>leaf</em> est disponible à partir de la version
+2.4.34 du serveur HTTP Apache</compatibility>
 
 <usage>
 <p>Cette directive permet d'activer la validation OCSP de la chaîne de
@@ -2776,8 +2801,8 @@ doit être définie à <code>off</code>.</p>
 <directivesynopsis>
 <name>SSLOCSPNoverify</name>
 <description>Evite la vérification des certificats des répondeurs OCSP</description>
-<syntax>SSLOCSPNoverify <em>On/Off</em></syntax>
-<default>SSLOCSPNoverify Off</default>
+<syntax>SSLOCSPNoverify on|off</syntax>
+<default>SSLOCSPNoverify off</default>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
 <compatibility>Disponible à partir de la version 2.4.26 du serveur HTTP Apache,
@@ -3089,7 +3114,7 @@ utile lorsqu'on passe par un mandataire</p>
 <name>SSLSessionTicketKeyFile</name>
 <description>Clé de chiffrement/déchiffrement permanente pour les
 tickets de session TLS</description>
-<syntax>SSLSessionTicketKeyFile <em>chemin-fichier</em></syntax>
+<syntax>SSLSessionTicketKeyFile <var>file-path</var></syntax>
 <contextlist><context>server config</context>
 <context>virtual host</context></contextlist>
 <compatibility>Disponible depuis la version 2.4.0 du serveur HTTP

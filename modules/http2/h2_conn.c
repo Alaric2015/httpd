@@ -229,7 +229,19 @@ apr_status_t h2_conn_run(struct h2_ctx *ctx, conn_rec *c)
              && mpm_state != AP_MPMQ_STOPPING);
 
     if (c->cs) {
-        c->cs->state = CONN_STATE_LINGER;
+        switch (session->state) {
+            case H2_SESSION_ST_INIT:
+            case H2_SESSION_ST_IDLE:
+            case H2_SESSION_ST_BUSY:
+            case H2_SESSION_ST_WAIT:
+                c->cs->state = CONN_STATE_WRITE_COMPLETION;
+                break;
+            case H2_SESSION_ST_CLEANUP:
+            case H2_SESSION_ST_DONE:
+            default:
+                c->cs->state = CONN_STATE_LINGER;
+            break;
+        }
     }
 
     return APR_SUCCESS;
@@ -243,6 +255,13 @@ apr_status_t h2_conn_pre_close(struct h2_ctx *ctx, conn_rec *c)
         return (status == APR_SUCCESS)? DONE : status;
     }
     return DONE;
+}
+
+/* APR callback invoked if allocation fails. */
+static int abort_on_oom(int retcode)
+{
+    ap_abort_on_oom();
+    return retcode; /* unreachable, hopefully. */
 }
 
 conn_rec *h2_slave_create(conn_rec *master, int slave_id, apr_pool_t *parent)
@@ -274,8 +293,9 @@ conn_rec *h2_slave_create(conn_rec *master, int slave_id, apr_pool_t *parent)
         return NULL;
     }
     apr_allocator_owner_set(allocator, pool);
+    apr_pool_abort_set(abort_on_oom, pool);
     apr_pool_tag(pool, "h2_slave_conn");
- 
+
     c = (conn_rec *) apr_palloc(pool, sizeof(conn_rec));
     if (c == NULL) {
         ap_log_cerror(APLOG_MARK, APLOG_ERR, APR_ENOMEM, master, 
@@ -294,8 +314,6 @@ conn_rec *h2_slave_create(conn_rec *master, int slave_id, apr_pool_t *parent)
     c->input_filters          = NULL;
     c->output_filters         = NULL;
     c->bucket_alloc           = apr_bucket_alloc_create(pool);
-    c->data_in_input_filters  = 0;
-    c->data_in_output_filters = 0;
     /* prevent mpm_event from making wrong assumptions about this connection,
      * like e.g. using its socket for an async read check. */
     c->clogging_input_filters = 1;

@@ -33,10 +33,6 @@
 #define FILTER_POOL     apr_hook_global_pool
 #include "ap_hooks.h"   /* for apr_hook_global_pool */
 
-/* XXX: Should these be configurable parameters? */
-#define THRESHOLD_MAX_BUFFER 65536
-#define MAX_REQUESTS_IN_PIPELINE 5
-
 /*
 ** This macro returns true/false if a given filter should be inserted BEFORE
 ** another filter. This will happen when one of: 1) there isn't another
@@ -293,7 +289,7 @@ static ap_filter_t *add_any_filter_handle(ap_filter_rec_t *frec, void *ctx,
                                           ap_filter_t **c_filters)
 {
     apr_pool_t *p = frec->ftype < AP_FTYPE_CONNECTION && r ? r->pool : c->pool;
-    ap_filter_t *f = apr_palloc(p, sizeof(*f));
+    ap_filter_t *f = apr_pcalloc(p, sizeof(*f));
     ap_filter_t **outf;
 
     if (frec->ftype < AP_FTYPE_PROTOCOL) {
@@ -325,9 +321,7 @@ static ap_filter_t *add_any_filter_handle(ap_filter_rec_t *frec, void *ctx,
     /* f->r must always be NULL for connection filters */
     f->r = frec->ftype < AP_FTYPE_CONNECTION ? r : NULL;
     f->c = c;
-    f->next = NULL;
-    f->bb = NULL;
-    f->deferred_pool = NULL;
+    APR_RING_ELEM_INIT(f, pending);
 
     if (INSERT_BEFORE(f, *outf)) {
         f->next = *outf;
@@ -451,11 +445,31 @@ AP_DECLARE(ap_filter_t *) ap_add_output_filter_handle(ap_filter_rec_t *f,
                                  &c->output_filters);
 }
 
+static APR_INLINE int is_pending_filter(ap_filter_t *f)
+{
+    return APR_RING_NEXT(f, pending) != f;
+}
+
+static apr_status_t pending_filter_cleanup(void *arg)
+{
+    ap_filter_t *f = arg;
+
+    APR_RING_REMOVE(f, pending);
+    APR_RING_ELEM_INIT(f, pending);
+    f->bb = NULL;
+
+    return APR_SUCCESS;
+}
+
 static void remove_any_filter(ap_filter_t *f, ap_filter_t **r_filt, ap_filter_t **p_filt,
                               ap_filter_t **c_filt)
 {
     ap_filter_t **curr = r_filt ? r_filt : c_filt;
     ap_filter_t *fscan = *curr;
+
+    if (is_pending_filter(f)) {
+        apr_pool_cleanup_run(f->c->pool, f, pending_filter_cleanup);
+    }
 
     if (p_filt && *p_filt == f)
         *p_filt = (*p_filt)->next;
@@ -695,53 +709,65 @@ AP_DECLARE(apr_status_t) ap_save_brigade(ap_filter_t *f,
     return srv;
 }
 
-static apr_status_t filters_cleanup(void *data)
-{
-    ap_filter_t **key = data;
-
-    apr_hash_set((*key)->c->filters, key, sizeof *key, NULL);
-
-    return APR_SUCCESS;
-}
-
 AP_DECLARE(int) ap_filter_prepare_brigade(ap_filter_t *f, apr_pool_t **p)
 {
     apr_pool_t *pool;
-    ap_filter_t **key;
+    ap_filter_t *next, *e;
+    ap_filter_t *found = NULL;
 
+    pool = f->r ? f->r->pool : f->c->pool;
+    if (p) {
+        *p = pool;
+    }
     if (!f->bb) {
-
-        pool = f->r ? f->r->pool : f->c->pool;
-
-        key = apr_pmemdup(pool, &f, sizeof f);
-        apr_hash_set(f->c->filters, key, sizeof *key, f);
-
         f->bb = apr_brigade_create(pool, f->c->bucket_alloc);
-
-        apr_pool_pre_cleanup_register(pool, key, filters_cleanup);
-
-        if (p) {
-            *p = pool;
-        }
-
-        return OK;
+        apr_pool_cleanup_register(pool, f, pending_filter_cleanup,
+                                  apr_pool_cleanup_null);
+    }
+    if (is_pending_filter(f)) {
+        return DECLINED;
     }
 
-    return DECLINED;
+    /* Pending reads/writes must happen in the same order as input/output
+     * filters, so find the first "next" filter already in place and insert
+     * before it, if any, otherwise insert last.
+     */
+    if (f->c->pending_filters) {
+        for (next = f->next; next && !found; next = next->next) {
+            for (e = APR_RING_FIRST(f->c->pending_filters);
+                 e != APR_RING_SENTINEL(f->c->pending_filters,
+                                        ap_filter_t, pending);
+                 e = APR_RING_NEXT(e, pending)) {
+                if (e == next) {
+                    found = e;
+                    break;
+                }
+            }
+        }
+    }
+    else {
+        f->c->pending_filters = apr_palloc(f->c->pool,
+                                           sizeof(*f->c->pending_filters));
+        APR_RING_INIT(f->c->pending_filters, ap_filter_t, pending);
+    }
+    if (found) {
+        APR_RING_INSERT_BEFORE(found, f, pending);
+    }
+    else {
+        APR_RING_INSERT_TAIL(f->c->pending_filters, f, ap_filter_t, pending);
+    }
+ 
+    return OK;
 }
 
 AP_DECLARE(apr_status_t) ap_filter_setaside_brigade(ap_filter_t *f,
-        apr_bucket_brigade *bb)
+                                                    apr_bucket_brigade *bb)
 {
-    int loglevel = ap_get_conn_module_loglevel(f->c, APLOG_MODULE_INDEX);
-
-    if (loglevel >= APLOG_TRACE6) {
-        ap_log_cerror(
-            APLOG_MARK, APLOG_TRACE6, 0, f->c,
-            "setaside %s brigade to %s brigade in '%s' output filter",
-            (APR_BRIGADE_EMPTY(bb) ? "empty" : "full"),
-            (!f->bb || APR_BRIGADE_EMPTY(f->bb) ? "empty" : "full"), f->frec->name);
-    }
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE6, 0, f->c,
+                  "setaside %s brigade to %s brigade in '%s' output filter",
+                  APR_BRIGADE_EMPTY(bb) ? "empty" : "full",
+                  (!f->bb || APR_BRIGADE_EMPTY(f->bb)) ? "empty" : "full",
+                  f->frec->name);
 
     if (!APR_BRIGADE_EMPTY(bb)) {
         /*
@@ -790,19 +816,23 @@ AP_DECLARE(apr_status_t) ap_filter_reinstate_brigade(ap_filter_t *f,
     apr_bucket *bucket, *next;
     apr_size_t bytes_in_brigade, non_file_bytes_in_brigade;
     int eor_buckets_in_brigade, morphing_bucket_in_brigade;
-    int loglevel = ap_get_conn_module_loglevel(f->c, APLOG_MODULE_INDEX);
-
-    if (loglevel >= APLOG_TRACE6) {
-        ap_log_cerror(
-            APLOG_MARK, APLOG_TRACE6, 0, f->c,
-            "reinstate %s brigade to %s brigade in '%s' output filter",
-            (!f->bb || APR_BRIGADE_EMPTY(f->bb) ? "empty" : "full"),
-            (APR_BRIGADE_EMPTY(bb) ? "empty" : "full"), f->frec->name);
-    }
-
+    core_server_config *conf;
+ 
     if (f->bb && !APR_BRIGADE_EMPTY(f->bb)) {
         APR_BRIGADE_PREPEND(bb, f->bb);
     }
+    if (!flush_upto) {
+        /* Just prepend all. */
+        return APR_SUCCESS;
+    }
+ 
+    *flush_upto = NULL;
+
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE6, 0, f->c,
+                  "reinstate %s brigade to %s brigade in '%s' output filter",
+                  (!f->bb || APR_BRIGADE_EMPTY(f->bb) ? "empty" : "full"),
+                  (APR_BRIGADE_EMPTY(bb) ? "empty" : "full"),
+                  f->frec->name);
 
     /*
      * Determine if and up to which bucket we need to do a blocking write:
@@ -811,16 +841,16 @@ AP_DECLARE(apr_status_t) ap_filter_reinstate_brigade(ap_filter_t *f,
      *     of everything up that point.
      *
      *  b) The request is in CONN_STATE_HANDLER state, and the brigade
-     *     contains at least THRESHOLD_MAX_BUFFER bytes in non-file
+     *     contains at least flush_max_threshold bytes in non-file
      *     buckets: Do blocking writes until the amount of data in the
-     *     buffer is less than THRESHOLD_MAX_BUFFER.  (The point of this
+     *     buffer is less than flush_max_threshold.  (The point of this
      *     rule is to provide flow control, in case a handler is
      *     streaming out lots of data faster than the data can be
      *     sent to the client.)
      *
      *  c) The request is in CONN_STATE_HANDLER state, and the brigade
-     *     contains at least MAX_REQUESTS_IN_PIPELINE EOR buckets:
-     *     Do blocking writes until less than MAX_REQUESTS_IN_PIPELINE EOR
+     *     contains at least flush_max_pipelined EOR buckets:
+     *     Do blocking writes until less than flush_max_pipelined EOR
      *     buckets are left. (The point of this rule is to prevent too many
      *     FDs being kept open by pipelined requests, possibly allowing a
      *     DoS).
@@ -828,18 +858,18 @@ AP_DECLARE(apr_status_t) ap_filter_reinstate_brigade(ap_filter_t *f,
      *  d) The request is being served by a connection filter and the
      *     brigade contains a morphing bucket: If there was no other
      *     reason to do a blocking write yet, try reading the bucket. If its
-     *     contents fit into memory before THRESHOLD_MAX_BUFFER is reached,
+     *     contents fit into memory before flush_max_threshold is reached,
      *     everything is fine. Otherwise we need to do a blocking write the
      *     up to and including the morphing bucket, because ap_save_brigade()
      *     would read the whole bucket into memory later on.
      */
 
-    *flush_upto = NULL;
-
     bytes_in_brigade = 0;
     non_file_bytes_in_brigade = 0;
     eor_buckets_in_brigade = 0;
     morphing_bucket_in_brigade = 0;
+
+    conf = ap_get_core_module_config(f->c->base_server->module_config);
 
     for (bucket = APR_BRIGADE_FIRST(bb); bucket != APR_BRIGADE_SENTINEL(bb);
          bucket = next) {
@@ -865,18 +895,18 @@ AP_DECLARE(apr_status_t) ap_filter_reinstate_brigade(ap_filter_t *f,
         }
 
         if (APR_BUCKET_IS_FLUSH(bucket)
-            || non_file_bytes_in_brigade >= THRESHOLD_MAX_BUFFER
+            || non_file_bytes_in_brigade >= conf->flush_max_threshold
             || (!f->r && morphing_bucket_in_brigade)
-            || eor_buckets_in_brigade > MAX_REQUESTS_IN_PIPELINE) {
+            || eor_buckets_in_brigade > conf->flush_max_pipelined) {
             /* this segment of the brigade MUST be sent before returning. */
 
-            if (loglevel >= APLOG_TRACE6) {
+            if (APLOGctrace6(f->c)) {
                 char *reason = APR_BUCKET_IS_FLUSH(bucket) ?
                                "FLUSH bucket" :
-                               (non_file_bytes_in_brigade >= THRESHOLD_MAX_BUFFER) ?
-                               "THRESHOLD_MAX_BUFFER" :
+                               (non_file_bytes_in_brigade >= conf->flush_max_threshold) ?
+                               "max threshold" :
                                (!f->r && morphing_bucket_in_brigade) ? "morphing bucket" :
-                               "MAX_REQUESTS_IN_PIPELINE";
+                               "max requests in pipeline";
                 ap_log_cerror(APLOG_MARK, APLOG_TRACE6, 0, f->c,
                               "will flush because of %s", reason);
                 ap_log_cerror(APLOG_MARK, APLOG_TRACE8, 0, f->c,
@@ -902,14 +932,12 @@ AP_DECLARE(apr_status_t) ap_filter_reinstate_brigade(ap_filter_t *f,
         }
     }
 
-    if (loglevel >= APLOG_TRACE8) {
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE8, 0, f->c,
-                      "brigade contains: bytes: %" APR_SIZE_T_FMT
-                      ", non-file bytes: %" APR_SIZE_T_FMT
-                      ", eor buckets: %d, morphing buckets: %d",
-                      bytes_in_brigade, non_file_bytes_in_brigade,
-                      eor_buckets_in_brigade, morphing_bucket_in_brigade);
-    }
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE8, 0, f->c,
+                  "brigade contains: bytes: %" APR_SIZE_T_FMT
+                  ", non-file bytes: %" APR_SIZE_T_FMT
+                  ", eor buckets: %d, morphing buckets: %d",
+                  bytes_in_brigade, non_file_bytes_in_brigade,
+                  eor_buckets_in_brigade, morphing_bucket_in_brigade);
 
     return APR_SUCCESS;
 }
@@ -967,46 +995,52 @@ AP_DECLARE(int) ap_filter_should_yield(ap_filter_t *f)
 
 AP_DECLARE_NONSTD(int) ap_filter_output_pending(conn_rec *c)
 {
-    apr_hash_index_t *rindex;
-    int data_in_output_filters = DECLINED;
+    apr_bucket_brigade *bb;
+    ap_filter_t *f;
 
-    rindex = apr_hash_first(NULL, c->filters);
-    while (rindex) {
-        ap_filter_t *f = apr_hash_this_val(rindex);
+    if (!c->pending_filters) {
+        return DECLINED;
+    }
 
+    bb = ap_reuse_brigade_from_pool("ap_fop_bb", c->pool,
+                                    c->bucket_alloc);
+
+    for (f = APR_RING_FIRST(c->pending_filters);
+         f != APR_RING_SENTINEL(c->pending_filters, ap_filter_t, pending);
+         f = APR_RING_NEXT(f, pending)) {
         if (f->frec->direction == AP_FILTER_OUTPUT && f->bb
                 && !APR_BRIGADE_EMPTY(f->bb)) {
-
             apr_status_t rv;
 
-            rv = ap_pass_brigade(f, c->empty);
-            apr_brigade_cleanup(c->empty);
-            if (APR_SUCCESS != rv) {
-                ap_log_cerror(
-                        APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO(00470)
+            rv = ap_pass_brigade(f, bb);
+            apr_brigade_cleanup(bb);
+
+            if (rv != APR_SUCCESS) {
+                ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO(00470)
                         "write failure in '%s' output filter", f->frec->name);
                 return rv;
             }
 
-            if (ap_filter_should_yield(f)) {
-                data_in_output_filters = OK;
+            if (f->bb && !APR_BRIGADE_EMPTY(f->bb)) {
+                return OK;
             }
         }
-
-        rindex = apr_hash_next(rindex);
     }
 
-    return data_in_output_filters;
+    return DECLINED;
 }
 
 AP_DECLARE_NONSTD(int) ap_filter_input_pending(conn_rec *c)
 {
-    apr_hash_index_t *rindex;
+    ap_filter_t *f;
 
-    rindex = apr_hash_first(NULL, c->filters);
-    while (rindex) {
-        ap_filter_t *f = apr_hash_this_val(rindex);
+    if (!c->pending_filters) {
+        return DECLINED;
+    }
 
+    for (f = APR_RING_FIRST(c->pending_filters);
+         f != APR_RING_SENTINEL(c->pending_filters, ap_filter_t, pending);
+         f = APR_RING_NEXT(f, pending)) {
         if (f->frec->direction == AP_FILTER_INPUT && f->bb) {
             apr_bucket *e = APR_BRIGADE_FIRST(f->bb);
 
@@ -1019,8 +1053,6 @@ AP_DECLARE_NONSTD(int) ap_filter_input_pending(conn_rec *c)
             }
 
         }
-
-        rindex = apr_hash_next(rindex);
     }
 
     return DECLINED;
