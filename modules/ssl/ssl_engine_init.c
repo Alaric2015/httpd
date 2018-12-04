@@ -294,10 +294,6 @@ apr_status_t ssl_init_Module(apr_pool_t *p, apr_pool_t *plog,
 #endif
     }
 
-#if APR_HAS_THREADS && MODSSL_USE_OPENSSL_PRE_1_1_API
-    ssl_util_thread_setup(p);
-#endif
-
     /*
      * SSL external crypto device ("engine") support
      */
@@ -790,6 +786,13 @@ static apr_status_t ssl_init_ctx_protocol(server_rec *s,
         SSL_CTX_set_mode(ctx, SSL_MODE_RELEASE_BUFFERS);
 #endif
 
+#if OPENSSL_VERSION_NUMBER >= 0x1010100fL
+    /* For OpenSSL >=1.1.1, disable auto-retry mode so it's possible
+     * to consume handshake records without blocking for app-data.
+     * https://github.com/openssl/openssl/issues/7178 */
+    SSL_CTX_clear_mode(ctx, SSL_MODE_AUTO_RETRY);
+#endif
+    
     return APR_SUCCESS;
 }
 
@@ -1060,8 +1063,10 @@ static int use_certificate_chain(
         ctx->extra_certs = NULL;
     }
 #endif
+
     /* create new extra chain by loading the certs */
     n = 0;
+    ERR_clear_error();
     while ((x509 = PEM_read_bio_X509(bio, NULL, cb, NULL)) != NULL) {
         if (!SSL_CTX_add_extra_chain_cert(ctx, x509)) {
             X509_free(x509);
@@ -1555,6 +1560,13 @@ static apr_status_t ssl_init_proxy_certs(server_rec *s,
     X509_STORE_CTX *sctx;
     X509_STORE *store = SSL_CTX_get_cert_store(mctx->ssl_ctx);
 
+#if OPENSSL_VERSION_NUMBER >= 0x1010100fL
+    /* For OpenSSL >=1.1.1, turn on client cert support which is
+     * otherwise turned off by default (by design).
+     * https://github.com/openssl/openssl/issues/6933 */
+    SSL_CTX_set_post_handshake_auth(mctx->ssl_ctx, 1);
+#endif
+    
     SSL_CTX_set_client_cert_cb(mctx->ssl_ctx,
                                ssl_callback_proxy_cert);
 
@@ -1789,7 +1801,7 @@ static apr_status_t ssl_init_server_ctx(server_rec *s,
         if (pks->cert_files->nelts > 0 || pks->key_files->nelts > 0) {
             ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, APLOGNO(10084)
                          "Init: (%s) You configured certificate/key files on this host, but "
-                         "is is covered by a Managed Domain. You need to remove these directives "
+                         "it is covered by a Managed Domain. You need to remove these directives "
                          "for the Managed Domain to take over.", ssl_util_vhostid(p, s));
         }
         else {

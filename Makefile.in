@@ -218,6 +218,7 @@ install-cgi:
 install-other:
 	@test -d $(DESTDIR)$(logfiledir) || $(MKINSTALLDIRS) $(DESTDIR)$(logfiledir)
 	@test -d $(DESTDIR)$(runtimedir) || $(MKINSTALLDIRS) $(DESTDIR)$(runtimedir)
+	@test -d $(DESTDIR)$(statedir) || $(MKINSTALLDIRS) $(DESTDIR)$(statedir)
 	@for ext in dll x; do \
 		file=apachecore.$$ext; \
 		if test -f $$file; then \
@@ -447,7 +448,7 @@ check-no:
 
 check-yes: check-include check-dirs check-conf check/build/config_vars.mk \
 	check-binaries $(TEST_SUITE_LOCATION)/Makefile
-	cd $(TEST_SUITE_LOCATION) && ./t/TEST $(TESTS)
+	cd $(TEST_SUITE_LOCATION) && $(MAKE) && ./t/TEST $(TESTS)
 
 # Run the Apache::Test suite if it has been configured with --with-test-suite.
 check: check-$(WITH_TEST_SUITE)

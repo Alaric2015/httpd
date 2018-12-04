@@ -148,6 +148,8 @@ AP_DECLARE_DATA int ap_main_state = AP_SQ_MS_INITIAL_STARTUP;
 AP_DECLARE_DATA int ap_run_mode = AP_SQ_RM_UNKNOWN;
 AP_DECLARE_DATA int ap_config_generation = 0;
 
+static const char *core_state_dir;
+
 typedef struct {
     apr_ipsubnet_t *subnet;
     struct ap_logconf log;
@@ -525,6 +527,7 @@ static void *create_core_server_config(apr_pool_t *a, server_rec *s)
     conf->protocols = apr_array_make(a, 5, sizeof(const char *));
     conf->protocols_honor_order = -1;
     conf->async_filter = 0;
+    conf->strict_host_check= AP_CORE_CONFIG_UNSET; 
 
     return (void *)conf;
 }
@@ -619,6 +622,12 @@ static void *merge_core_server_configs(apr_pool_t *p, void *basev, void *virtv)
     conf->flush_max_pipelined = (virt->flush_max_pipelined >= 0)
                                   ? virt->flush_max_pipelined
                                   : base->flush_max_pipelined;
+
+    conf->strict_host_check = (virt->strict_host_check != AP_CORE_CONFIG_UNSET)
+                              ? virt->strict_host_check 
+                              : base->strict_host_check;
+
+    AP_CORE_MERGE_FLAG(strict_host_check, conf, base, virt);
 
     return conf;
 }
@@ -1962,7 +1971,12 @@ static const char *set_qualify_redirect_url(cmd_parms *cmd, void *d_, int flag)
 
     return NULL;
 }
-
+static const char *set_core_server_flag(cmd_parms *cmd, void *s_, int flag)
+{
+    core_server_config *conf =
+        ap_get_core_module_config(cmd->server->module_config);
+    return ap_set_flag_slot(cmd, conf, flag);
+}
 static const char *set_override_list(cmd_parms *cmd, void *d_, int argc, char *const argv[])
 {
     core_dir_config *d = d_;
@@ -3258,6 +3272,24 @@ static const char *set_runtime_dir(cmd_parms *cmd, void *dummy, const char *arg)
                             APR_FILEPATH_TRUENAME, cmd->pool) != APR_SUCCESS)
         || !ap_is_directory(cmd->temp_pool, ap_runtime_dir)) {
         return "DefaultRuntimeDir must be a valid directory, absolute or relative to ServerRoot";
+    }
+
+    return NULL;
+}
+
+static const char *set_state_dir(cmd_parms *cmd, void *dummy, const char *arg)
+{
+    const char *err = ap_check_cmd_context(cmd, GLOBAL_ONLY);
+
+    if (err != NULL) {
+        return err;
+    }
+
+    if ((apr_filepath_merge((char**)&core_state_dir, NULL,
+                            ap_server_root_relative(cmd->temp_pool, arg),
+                            APR_FILEPATH_TRUENAME, cmd->pool) != APR_SUCCESS)
+        || !ap_is_directory(cmd->temp_pool, core_state_dir)) {
+        return "DefaultStateDir must be a valid directory, absolute or relative to ServerRoot";
     }
 
     return NULL;
@@ -4712,6 +4744,8 @@ AP_INIT_TAKE1("ServerRoot", set_server_root, NULL, RSRC_CONF | EXEC_ON_READ,
   "Common directory of server-related files (logs, confs, etc.)"),
 AP_INIT_TAKE1("DefaultRuntimeDir", set_runtime_dir, NULL, RSRC_CONF | EXEC_ON_READ,
   "Common directory for run-time files (shared memory, locks, etc.)"),
+AP_INIT_TAKE1("DefaultStateDir", set_state_dir, NULL, RSRC_CONF | EXEC_ON_READ,
+  "Common directory for persistent state (databases, long-lived caches, etc.)"),
 AP_INIT_TAKE12("ErrorLog", set_errorlog,
   (void *)APR_OFFSETOF(server_rec, error_fname), RSRC_CONF,
   "The filename of the error log"),
@@ -4816,7 +4850,10 @@ AP_INIT_TAKE2("CGIVar", set_cgi_var, NULL, OR_FILEINFO,
 AP_INIT_FLAG("QualifyRedirectURL", set_qualify_redirect_url, NULL, OR_FILEINFO,
              "Controls whether the REDIRECT_URL environment variable is fully "
              "qualified"),
-
+AP_INIT_FLAG("StrictHostCheck", set_core_server_flag, 
+             (void *)APR_OFFSETOF(core_server_config, strict_host_check),  
+             RSRC_CONF,
+             "Controls whether a hostname match is required"),
 AP_INIT_TAKE1("ForceType", ap_set_string_slot_lower,
        (void *)APR_OFFSETOF(core_dir_config, mime_type), OR_FILEINFO,
      "a mime type that overrides other configured type"),
@@ -5521,6 +5558,7 @@ AP_CORE_DECLARE(conn_rec *) ap_create_slave_connection(conn_rec *c)
     sc->master = c;
     sc->input_filters = NULL;
     sc->output_filters = NULL;
+    sc->filter_conn_ctx = NULL;
     sc->pool = pool;
     new = apr_array_push(c->slaves);
     new->c = sc;
@@ -5540,6 +5578,28 @@ AP_DECLARE(int) ap_state_query(int query)
         return AP_SQ_NOT_SUPPORTED;
     }
 }
+
+AP_DECLARE(char *) ap_state_dir_relative(apr_pool_t *p, const char *file)
+{
+    char *newpath = NULL;
+    apr_status_t rv;
+    const char *state_dir;
+
+    state_dir = core_state_dir
+        ? core_state_dir
+        : ap_server_root_relative(p, DEFAULT_REL_STATEDIR);
+
+    rv = apr_filepath_merge(&newpath, state_dir, file, APR_FILEPATH_TRUENAME, p);
+    if (newpath && (rv == APR_SUCCESS || APR_STATUS_IS_EPATHWILD(rv)
+                                      || APR_STATUS_IS_ENOENT(rv)
+                                      || APR_STATUS_IS_ENOTDIR(rv))) {
+        return newpath;
+    }
+    else {
+        return NULL;
+    }
+}
+
 
 #if !USE_APR_CRYPTO_PRNG
 static apr_random_t *rng = NULL;
@@ -5872,7 +5932,7 @@ static void register_hooks(apr_pool_t *p)
                                   NULL, AP_FTYPE_NETWORK);
     ap_request_core_filter_handle =
         ap_register_output_filter("REQ_CORE", ap_request_core_filter,
-                                  NULL, AP_FTYPE_TRANSCODE);
+                                  NULL, AP_FTYPE_CONNECTION - 1);
     ap_subreq_core_filter_handle =
         ap_register_output_filter("SUBREQ_CORE", ap_sub_req_output_filter,
                                   NULL, AP_FTYPE_CONTENT_SET);
@@ -5891,4 +5951,3 @@ AP_DECLARE_MODULE(core) = {
     core_cmds,                    /* command apr_table_t */
     register_hooks                /* register hooks */
 };
-

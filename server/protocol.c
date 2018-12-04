@@ -1348,10 +1348,11 @@ request_rec *ap_read_request(conn_rec *conn)
     apr_bucket_brigade *tmp_bb;
     apr_socket_t *csd;
     apr_interval_time_t cur_timeout;
-
+    core_server_config *conf;
 
     request_rec *r = ap_create_request(conn);
 
+    conf = ap_get_core_module_config(r->server->module_config);
     tmp_bb = apr_brigade_create(r->pool, r->connection->bucket_alloc);
 
     ap_run_pre_read_request(r, conn);
@@ -1455,7 +1456,23 @@ request_rec *ap_read_request(conn_rec *conn)
     /* update what we think the virtual host is based on the headers we've
      * now read. may update status.
      */
-    ap_update_vhost_from_headers(r);
+    
+    access_status = ap_update_vhost_from_headers_ex(r, conf->strict_host_check == AP_CORE_CONFIG_ON);
+    if (conf->strict_host_check == AP_CORE_CONFIG_ON && access_status != HTTP_OK) { 
+         if (r->server == ap_server_conf) { 
+             ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, APLOGNO(10156)
+                           "Requested hostname '%s' did not match any ServerName/ServerAlias "
+                           "in the global server configuration ", r->hostname);
+         } else { 
+             ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, APLOGNO(10157)
+                           "Requested hostname '%s' did not match any ServerName/ServerAlias "
+                           "in the matching virtual host (default vhost for "
+                           "current connection is %s:%u)", 
+                           r->hostname, r->server->defn_name, r->server->defn_line_number);
+         }
+         r->status = access_status;
+    }
+
     access_status = r->status;
 
     /* Toggle to the Host:-based vhost's timeout mode to fetch the
@@ -1516,9 +1533,6 @@ request_rec *ap_read_request(conn_rec *conn)
             r->expecting_100 = 1;
         }
         else {
-            core_server_config *conf;
-
-            conf = ap_get_core_module_config(r->server->module_config);
             if (conf->http_expect_strict != AP_HTTP_EXPECT_STRICT_DISABLE) {
                 r->status = HTTP_EXPECTATION_FAILED;
                 ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, APLOGNO(00570)
@@ -1528,7 +1542,8 @@ request_rec *ap_read_request(conn_rec *conn)
                 ap_update_child_status(conn->sbh, SERVER_BUSY_LOG, r);
                 ap_run_log_transaction(r);
                 goto traceout;
-            } else {
+            }
+            else {
                 ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, APLOGNO(02595)
                               "client sent an unrecognized expectation value "
                               "of Expect (not fatal): %s", expect);
@@ -1930,7 +1945,7 @@ AP_CORE_DECLARE_NONSTD(apr_status_t) ap_content_length_filter(
          * such filters update or remove the C-L header, and just use it
          * if present.
          */
-        if (!(r->header_only
+        if (!((r->header_only || AP_STATUS_IS_HEADER_ONLY(r->status))
               && !r->bytes_sent
               && (r->sent_bodyct
                   || conf->http_cl_head_zero != AP_HTTP_CL_HEAD_ZERO_ENABLE
@@ -2194,6 +2209,7 @@ AP_DECLARE_NONSTD(int) ap_rvputs(request_rec *r, ...)
 
         len = strlen(s);
         if (buffer_output(r, s, len) != APR_SUCCESS) {
+            va_end(va);
             return -1;
         }
 

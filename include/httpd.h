@@ -528,6 +528,7 @@ AP_DECLARE(const char *) ap_get_server_built(void);
 #define HTTP_UNPROCESSABLE_ENTITY            422
 #define HTTP_LOCKED                          423
 #define HTTP_FAILED_DEPENDENCY               424
+#define HTTP_TOO_EARLY                       425
 #define HTTP_UPGRADE_REQUIRED                426
 #define HTTP_PRECONDITION_REQUIRED           428
 #define HTTP_TOO_MANY_REQUESTS               429
@@ -570,6 +571,10 @@ AP_DECLARE(const char *) ap_get_server_built(void);
                                     ((x) == HTTP_INTERNAL_SERVER_ERROR) || \
                                     ((x) == HTTP_SERVICE_UNAVAILABLE) || \
                                     ((x) == HTTP_NOT_IMPLEMENTED))
+
+/** does the status imply header only response (i.e. never w/ a body)? */
+#define AP_STATUS_IS_HEADER_ONLY(x) ((x) == HTTP_NO_CONTENT || \
+                                     (x) == HTTP_NOT_MODIFIED)
 /** @} */
 
 /**
@@ -1107,6 +1112,9 @@ typedef enum {
     AP_CONN_KEEPALIVE
 } ap_conn_keepalive_e;
 
+/* For struct ap_filter and ap_filter_conn_ctx */
+#include "util_filter.h"
+
 /**
  * @brief Structure to store things which are per connection
  */
@@ -1217,8 +1225,8 @@ struct conn_rec {
     /** Array of requests being handled under this connection. */
     apr_array_header_t *requests;
 
-    /** Ring of pending filters (with setaside buckets) */
-    struct ap_filter_ring *pending_filters;
+    /** Filters private/opaque context for this connection */
+    struct ap_filter_conn_ctx *filter_conn_ctx;
 
     /** The minimum level of filter type to allow setaside buckets */
     int async_filter;
@@ -2187,19 +2195,6 @@ AP_DECLARE(int) ap_request_has_body(request_rec *r);
 AP_DECLARE(int) ap_request_tainted(request_rec *r, int flags);
 
 /**
- * Reuse a brigade from a pool, or create it on the given pool/alloc and
- * associate it with the given key for further reuse.
- *
- * @param key the key/id of the brigade
- * @param pool the pool to cache and create the brigade from
- * @param alloc the bucket allocator to be used by the brigade
- * @return the reused and cleaned up brigade, or a new one
- */
-AP_DECLARE(apr_bucket_brigade *) ap_reuse_brigade_from_pool(const char *key,
-                                                            apr_pool_t *pool,
-                                                    apr_bucket_alloc_t *alloc);
-
-/**
  * Cleanup a string (mainly to be filesystem safe)
  * We only allow '_' and alphanumeric chars. Non-printable
  * map to 'x' and all others map to '_'
@@ -2563,6 +2558,92 @@ AP_DECLARE(int) ap_cstr_casecmp(const char *s1, const char *s2);
  * @note Same code as apr_cstr_casecmpn, which arrives in APR 1.6
  */
 AP_DECLARE(int) ap_cstr_casecmpn(const char *s1, const char *s2, apr_size_t n);
+
+/**
+ * Default flags for apr_dir_*().
+ */
+#define AP_DIR_FLAG_NONE      0
+
+/**
+ * If set, wildcards that match no files or directories will be ignored, otherwise
+ * an error is triggered.
+ */
+#define AP_DIR_FLAG_OPTIONAL  1
+
+/**
+ * If set, and the wildcard resolves to a directory, recursively find all files
+ * below that directory, otherwise return the directory.
+ */
+#define AP_DIR_FLAG_RECURSIVE 2
+
+/**
+ * Structure to provide the state of a directory match.
+ */
+typedef struct ap_dir_match_t ap_dir_match_t;
+
+/**
+ * Concrete structure to provide the state of a directory match.
+ */
+struct ap_dir_match_t {
+    /** Pool to use for allocating the result */
+    apr_pool_t *p;
+    /** Temporary pool used for directory traversal */
+    apr_pool_t *ptemp;
+    /** Prefix for log messages */
+    const char *prefix;
+    /** Callback for each file found that matches the wildcard. Return NULL on success, an error string on error. */
+    const char *(*cb)(ap_dir_match_t *w, const char *fname);
+    /** Context for the callback */
+    void *ctx;
+    /** Flags to indicate whether optional or recursive */
+    int flags;
+    /** Recursion depth safety check */
+    unsigned int depth;
+};
+
+/**
+ * Search for files given a non wildcard filename with non native separators.
+ *
+ * If the provided filename points at a file, the callback within ap_dir_match_t is
+ * triggered for that file, and this function returns the result of the callback.
+ *
+ * If the provided filename points at a directory, and recursive within ap_dir_match_t
+ * is true, the callback will be triggered for every file found recursively beneath
+ * that directory, otherwise the callback is triggered once for the directory itself.
+ * This function returns the result of the callback.
+ *
+ * If the provided path points to neither a file nor a directory, and optional within
+ * ap_dir_match_t is true, this function returns NULL. If optional within ap_dir_match_t
+ * is false, this function will return an error string indicating that the path does not
+ * exist.
+ *
+ * @param w Directory match structure containing callback and context.
+ * @param fname The name of the file or directory, with non native separators.
+ * @return NULL on success, or a string describing the error.
+ */
+AP_DECLARE(const char *)ap_dir_nofnmatch(ap_dir_match_t *w, const char *fname)
+        __attribute__((nonnull(1,2)));
+
+/**
+ * Search for files given a wildcard filename with non native separators.
+ *
+ * If the filename contains a wildcard, all files and directories that match the wildcard
+ * will be returned.
+ *
+ * ap_dir_nofnmatch() is called for each directory and file found, and the callback
+ * within ap_dir_match_t triggered as described above.
+ *
+ * Wildcards may appear in both directory and file components in the path, and
+ * wildcards may appear more than once.
+ *
+ * @param w Directory match structure containing callback and context.
+ * @param path Path prefix for search, with non native separators and no wildcards.
+ * @param fname The name of the file or directory, with non native separators and
+ * optional wildcards.
+ * @return NULL on success, or a string describing the error.
+ */
+AP_DECLARE(const char *)ap_dir_fnmatch(ap_dir_match_t *w, const char *path,
+        const char *fname) __attribute__((nonnull(1,3)));
 
 #ifdef __cplusplus
 }

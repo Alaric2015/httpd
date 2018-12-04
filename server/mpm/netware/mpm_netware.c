@@ -886,6 +886,7 @@ static int netware_run(apr_pool_t *_pconf, apr_pool_t *plog, server_rec *s)
 
     /* Only set slot 0 since that is all NetWare will ever have. */
     ap_scoreboard_image->parent[0].pid = getpid();
+    ap_scoreboard_image->parent[0].generation = ap_my_generation;
     ap_run_child_status(ap_server_conf,
                         ap_scoreboard_image->parent[0].pid,
                         ap_my_generation,
@@ -1205,8 +1206,8 @@ static int CommandLineInterpreter(scr_t screenID, const char *commandLine)
         /* If we got an instance id but it doesn't match this
             instance of the nlm, pass it on. */
         if (pID) {
-            pID = &pID[2];
-            while (*pID && (*pID == ' '))
+            pID += 2;
+            while (*pID == ' ')
                 pID++;
         }
         if (pID && ap_my_addrspace && strnicmp(pID, ap_my_addrspace, strlen(ap_my_addrspace)))

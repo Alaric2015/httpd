@@ -264,6 +264,11 @@ struct ap_filter_rec_t {
 };
 
 /**
+ * @brief The private/opaque data in ap_filter_t.
+ */
+struct ap_filter_private;
+
+/**
  * @brief The representation of a filter chain.
  *
  * Each request has a list
@@ -293,20 +298,28 @@ struct ap_filter_t {
      */
     conn_rec *c;
 
-    /** Buffered data associated with the current filter. */
-    apr_bucket_brigade *bb;
-
-    /** Dedicated pool to use for deferred writes. */
-    apr_pool_t *deferred_pool;
-
-    /** Entry in ring of pending filters (with setaside buckets). */
-    APR_RING_ENTRY(ap_filter_t) pending;
+    /** Filter private/opaque data */
+    struct ap_filter_private *priv;
 };
 
 /**
- * @brief The representation of a filters' ring.
+ * @brief The filters private/opaque context in conn_rec.
  */
-typedef APR_RING_HEAD(ap_filter_ring, ap_filter_t) ap_filter_ring_t;
+struct ap_filter_conn_ctx;
+
+/**
+ * Acquire a brigade created on the connection pool/alloc.
+ * @param c The connection
+ * @return The brigade (cleaned up)
+ */
+AP_DECLARE(apr_bucket_brigade *) ap_acquire_brigade(conn_rec *c);
+
+/**
+ * Release and cleanup a brigade (created on the connection pool/alloc!).
+ * @param c The connection
+ * @param bb The brigade
+ */
+AP_DECLARE(void) ap_release_brigade(conn_rec *c, apr_bucket_brigade *bb);
 
 /**
  * Get the current bucket brigade from the next filter on the filter
@@ -569,12 +582,9 @@ AP_DECLARE(apr_status_t) ap_save_brigade(ap_filter_t *f,
  * filters, or can be used within an output filter by being called via
  * ap_filter_setaside_brigade().
  * @param f The current filter
- * @param p The pool that was used to create the brigade. In a request
- * filter this will be the request pool, in a connection filter this will
- * be the connection pool.
  * @returns OK if a brigade was created, DECLINED otherwise.
  */
-AP_DECLARE(int) ap_filter_prepare_brigade(ap_filter_t *f, apr_pool_t **p);
+AP_DECLARE(int) ap_filter_prepare_brigade(ap_filter_t *f);
 
 /**
  * Prepare a bucket brigade to be setaside, creating a dedicated pool if

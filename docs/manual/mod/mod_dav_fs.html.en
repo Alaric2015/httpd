@@ -64,9 +64,11 @@
 <table class="directive">
 <tr><th><a href="directive-dict.html#Description">Description:</a></th><td>Location of the DAV lock database</td></tr>
 <tr><th><a href="directive-dict.html#Syntax">Syntax:</a></th><td><code>DavLockDB <var>file-path</var></code></td></tr>
+<tr><th><a href="directive-dict.html#Default">Default:</a></th><td><code>DavLockDB DEFAULT_REL_STATEDIR/davlockdb</code></td></tr>
 <tr><th><a href="directive-dict.html#Context">Context:</a></th><td>server config, virtual host</td></tr>
 <tr><th><a href="directive-dict.html#Status">Status:</a></th><td>Extension</td></tr>
 <tr><th><a href="directive-dict.html#Module">Module:</a></th><td>mod_dav_fs</td></tr>
+<tr><th><a href="directive-dict.html#Compatibility">Compatibility:</a></th><td>No default prior to version 2.5.1.</td></tr>
 </table>
     <p>Use the <code class="directive">DavLockDB</code> directive to specify
     the full path to the lock database, excluding an extension. If
@@ -87,6 +89,11 @@
     an existing directory.  In the above example, Apache will create
     files in the <code>var/</code> directory under the <code class="directive"><a href="../mod/core.html#serverroot">ServerRoot</a></code> with the base filename
     <code>DavLock</code> and extension name chosen by the server.</p>
+
+    <div class="note"><h3>Default setting</h3>
+    <p>In httpd version 2.5.1 and later, a hard-coded default path
+    relative to the state directory (configurable via <code class="directive"><a href="../mod/core.html#defaultstatedir">DefaultStateDir</a></code>) is used.</p>
+    </div>
 
 
 </div>

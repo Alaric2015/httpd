@@ -139,7 +139,7 @@ static const char * const status_lines[RESPONSE_CODES] =
     "422 Unprocessable Entity",
     "423 Locked",
     "424 Failed Dependency",
-    NULL, /* 425 */
+    "425 Too Early",
     "426 Upgrade Required",
     NULL, /* 427 */
     "428 Precondition Required",
@@ -254,9 +254,8 @@ AP_DECLARE(int) ap_set_keepalive(request_rec *r)
      */
     if ((r->connection->keepalive != AP_CONN_CLOSE)
         && !r->expecting_100
-        && ((r->status == HTTP_NOT_MODIFIED)
-            || (r->status == HTTP_NO_CONTENT)
-            || r->header_only
+        && (r->header_only
+            || AP_STATUS_IS_HEADER_ONLY(r->status)
             || apr_table_get(r->headers_out, "Content-Length")
             || ap_find_last_token(r->pool,
                                   apr_table_get(r->headers_out,
@@ -1110,6 +1109,9 @@ static const char *get_canned_error_string(int status,
         return("<p>The method could not be performed on the resource\n"
                "because the requested action depended on another\n"
                "action and that other action failed.</p>\n");
+    case HTTP_TOO_EARLY:
+        return("<p>The request could not be processed as TLS\n"
+               "early data and should be retried.</p>\n");
     case HTTP_UPGRADE_REQUIRED:
         return("<p>The requested resource can only be retrieved\n"
                "using SSL.  The server is willing to upgrade the current\n"
@@ -1239,6 +1241,15 @@ AP_DECLARE(void) ap_send_error_response(request_rec *r, int recursive_error)
 
     ap_run_insert_error_filter(r);
 
+    /* We need to special-case the handling of 204 and 304 responses,
+     * since they have specific HTTP requirements and do not include a
+     * message body.  Note that being assbackwards here is not an option.
+     */
+    if (AP_STATUS_IS_HEADER_ONLY(status)) {
+        ap_finalize_request_protocol(r);
+        return;
+    }
+
     /*
      * It's possible that the Location field might be in r->err_headers_out
      * instead of r->headers_out; use the latter if possible, else the
@@ -1246,19 +1257,6 @@ AP_DECLARE(void) ap_send_error_response(request_rec *r, int recursive_error)
      */
     if (location == NULL) {
         location = apr_table_get(r->err_headers_out, "Location");
-    }
-    /* We need to special-case the handling of 204 and 304 responses,
-     * since they have specific HTTP requirements and do not include a
-     * message body.  Note that being assbackwards here is not an option.
-     */
-    if (status == HTTP_NOT_MODIFIED) {
-        ap_finalize_request_protocol(r);
-        return;
-    }
-
-    if (status == HTTP_NO_CONTENT) {
-        ap_finalize_request_protocol(r);
-        return;
     }
 
     if (!r->assbackwards) {

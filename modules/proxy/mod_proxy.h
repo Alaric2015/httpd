@@ -403,6 +403,9 @@ typedef struct {
     char      uds_path[PROXY_WORKER_MAX_NAME_SIZE];   /* path to worker's unix domain socket if applicable */
     char      hcuri[PROXY_WORKER_MAX_ROUTE_SIZE];     /* health check uri */
     char      hcexpr[PROXY_WORKER_MAX_SCHEME_SIZE];   /* name of condition expr for health check */
+    char      secret[PROXY_WORKER_MAX_SECRET_SIZE]; /* authentication secret (e.g. AJP13) */
+    char      upgrade[PROXY_WORKER_MAX_SCHEME_SIZE];/* upgrade protocol used by mod_proxy_wstunnel */
+    char      hostname_ex[PROXY_RFC1035_HOSTNAME_SIZE];  /* RFC1035 compliant version of the remote backend address */
     int             lbset;      /* load balancer cluster set */
     int             retries;    /* number of retries on this worker */
     int             lbstatus;   /* Current lbstatus */
@@ -424,7 +427,7 @@ typedef struct {
         flush_auto
     } flush_packets;            /* control AJP flushing */
     hcmethod_t      method;     /* method to use for health check */
-    apr_time_t      updated;    /* timestamp of last update */
+    apr_time_t      updated;    /* timestamp of last update for dynamic workers, or queue-time of HC workers */
     apr_time_t      error_time; /* time of the last error */
     apr_interval_time_t ttl;    /* maximum amount of time in seconds a connection
                                  * may be available while exceeding the soft limit */
@@ -438,6 +441,7 @@ typedef struct {
     apr_size_t      io_buffer_size;
     apr_size_t      elected;    /* Number of times the worker was elected */
     apr_size_t      busy;       /* busyness factor */
+    apr_size_t      response_field_size; /* Size of proxy response buffer in bytes. */
     apr_port_t      port;
     apr_off_t       transferred;/* Number of bytes transferred to remote */
     apr_off_t       read;       /* Number of bytes read from remote */
@@ -456,11 +460,7 @@ typedef struct {
     unsigned int     disablereuse_set:1;
     unsigned int     was_malloced:1;
     unsigned int     is_name_matchable:1;
-    char      secret[PROXY_WORKER_MAX_SECRET_SIZE]; /* authentication secret (e.g. AJP13) */
-    char      upgrade[PROXY_WORKER_MAX_SCHEME_SIZE];/* upgrade protocol used by mod_proxy_wstunnel */
-    char      hostname_ex[PROXY_RFC1035_HOSTNAME_SIZE];  /* RFC1035 compliant version of the remote backend address */
-    apr_size_t   response_field_size; /* Size of proxy response buffer in bytes. */
-    unsigned int response_field_size_set:1;
+    unsigned int     response_field_size_set:1;
 } proxy_worker_shared;
 
 #define ALIGNED_PROXY_WORKER_SHARED_SIZE (APR_ALIGN_DEFAULT(sizeof(proxy_worker_shared)))

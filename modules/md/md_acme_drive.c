@@ -664,6 +664,14 @@ static apr_status_t acme_driver_init(md_proto_driver_t *d)
                       " port 443 is needed.", d->md->name);
         return APR_EGENERAL;
     }
+    else if (ad->ca_challenges->nelts == 1 
+        && md_array_str_index(ad->ca_challenges, MD_AUTHZ_TYPE_TLSSNI01, 0, 0) >= 0) {
+        md_log_perror(MD_LOG_MARK, MD_LOG_WARNING, 0, d->p, "%s: only challenge type '%s' "
+                      "is available. This method of obtaining certificates will be "
+                      "discontinued by Let's Encrypt and other CAs from early 2019 on, "
+                      "if it is not already disabled for you.", 
+                      d->md->name, MD_AUTHZ_TYPE_TLSSNI01);
+    } 
     
     md_log_perror(MD_LOG_MARK, MD_LOG_TRACE1, 0, d->p, "%s: init driver", d->md->name);
     

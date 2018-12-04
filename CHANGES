@@ -1,6 +1,91 @@
                                                          -*- coding: utf-8 -*-
 Changes with Apache 2.5.1
 
+  *) core: Split out the ability to parse wildcard files and directories
+     from the Include/IncludeOptional directives into a generic set of
+     functions ap_dir_nofnmatch() and ap_dir_fnmatch(). [Graham Leggett]
+
+  *) mod_dav: Fix an unlikely time-window where some incorrect data could be returned
+     from a PROPFIND request [Ruediger Pluem]
+
+  *) mod_ssl: Fix mod_authz provider for "require ssl" directive to check correctly
+     on HTTP/2 connections. Fixes PR 62654. [Stefan Eissing]
+
+  *) mod_ssl: clear *SSL errors before loading certificates and checking
+     afterwards. Otherwise errors are reported when other SSL using modules
+     are in play. Fixes PR 62880. [Michael Kaufmann]
+
+  *) mod_ssl: Correctly merge configurations that have client certificates set
+     by SSLProxyMachineCertificate{File|Path}. [Ruediger Pluem]
+
+  *) core: Ensure that aborted connections are logged as such. PR 62823
+     [Arnaud Grandville <contact@grandville.net>]
+
+  *) mpm_event: Stop issuing AH00484 "server reached MaxRequestWorkers..." when
+     there are still idle threads available. When there are less idle threads than
+     MinSpareThreads, issue new one-time message AH10159. Matches worker MPM.
+     [Eric Covener]
+
+  *) mod_http2: adding defensive code for stream EOS handling, in case the request handler
+     missed to signal it the normal way (eos buckets). Addresses github issues 
+     https://github.com/icing/mod_h2/issues/164, https://github.com/icing/mod_h2/issues/167
+     and https://github.com/icing/mod_h2/issues/170. [Stefan Eissing] 
+
+  *) mod_proxy_scgi, mod_proxy_uwsgi: improve error handling when sending the
+     body of the response. [Jim Jagielski]
+
+  *) mod_session_cookie: avoid duplicate Set-Cookie header in the response.
+     [Emmanuel Dreyfus <manu@netbsd.org>, Luca Toscano]
+
+  *) mod_dav_fs: Set a default DAVLockDB within the state directory.
+     [Joe Orton]
+
+  *) core: Add DefaultStateDir and layout-specific state directory
+     created at "make install".  [Joe Orton]
+
+  *) mod_ssl: Fix a regression that the configuration settings for verify mode
+     and verify depth were taken from the frontend connection in case of
+     connections by the proxy to the backend. PR 62769. [Ruediger Pluem]
+
+  *) ab: Add client certificate support. [Graham Leggett]
+
+  *) mod_proxy_hcheck: Fix issues with TCP health checks. PR 61499
+     [Dominik Stillhard <dominik.stillhard united-security-providers.ch>]
+
+  *) mod_http2: connection IO event handling reworked. Instead of reacting on 
+     incoming bytes, the state machine now acts on incoming frames that are 
+     affecting it. This reduces state transitions. [Stefan Eissing]
+
+  *) MPMs: Initialize all runtime/asynchronous objects on a dedicated pool and
+     before signals handling to avoid lifetime issues on restart or shutdown.
+     PR 62658. [Yann Ylavic]
+
+  *) core: Add StrictHostCheck to allow ucnonfigured hostnames to be
+     rejected. [Eric Covener]
+
+  *) mod_status: Cumulate CPU time of exited child processes in the
+     "cu" and "cs" values. Add CPU time of the parent process to the
+     "c" and "s" values.
+     [Rainer Jung]
+
+  *) mod_status: Add cumulated response duration time in milliseconds.
+     [Rainer Jung]
+
+  *) mod_status: Complete the data shown for async MPMs in "auto" mode.
+     Added number of processes, number of stopping processes and number
+     of busy and idle workers.  [Rainer Jung]
+
+  *) mod_proxy: Improve the balancer member data shown in mod_status when
+     "ProxyStatus" is "On": add "busy" count and show byte counts in auto
+     mode always in units of kilobytes.  [Rainer Jung]
+
+  *) mod_proxy: If ProxyPassReverse is used for reverse mapping of relative
+     redirects, subsequent ProxyPassReverse statements, whether they are
+     relative or absolute, may fail.  PR 60408.  [Peter Haworth <pmh1wheel gmail.com>]
+
+  *) mod_ratelimit: Don't interfere with "chunked" encoding, fixing regression
+     introduced in 2.4.34.  PR 62568.  [Yann Ylavic]
+
   *) mod_proxy_http: forward 100-continue, and minimize race conditions when
      reusing backend connections. PR 60330. [Yann Ylavic, Jean-Frederic Clere]
 
@@ -13,38 +98,12 @@ Changes with Apache 2.5.1
   *) ru, zh-cn and zh-tw translations of errordocs have been added.
      Contributed by Alexander Gaganashvili and CodeingBoy
   
-  *) mod_authz_core: If several parameters are used in a AuthzProviderAlias
-     directive, if these parameters are not enclosed in quotation mark, only
-     the first one is handled. The other ones are silently ignored.
-     Add a message to warn about such a spurious configuration.
-     PR 62469 [Hank Ibell <hwibell gmail.com>, Christophe Jaillet]
-
-  *) mod_proxy_wstunnel: Add default schema ports for 'ws' and 'wss'.
-     PR 62480. [Lubos Uhliarik <luhliari redhat.com>}
-  
-  *) mod_ratelimit: fix behavior when proxing content. PR 62362.
-     [Yann Ylavic, Luca Toscano]
-
-  *) http: Fix small memory leak per request when handling persistent
-     connections.  [Ruediger Pluem, Joe Orton]
-
-  *) mod_remoteip: Fix RemoteIP{Trusted,Internal}ProxyList loading broken by 2.4.30.
-     PR 62220.  [Chritophe Jaillet, Yann Ylavic]
-
   *) mod_userdir: If several directories are given in a UserDir directive, only files
      in the first existing one are checked. If the file is not found there, the
      other possible directories are not checked. The doc clearly states that they
      will be checked one by one, until a match is found or an external redirect is
      performed.  PR 59636.
      [Christophe Jaillet]
-
-  *) mod_proxy: Fix a corner case where the ProxyPassReverseCookieDomain or
-     ProxyPassReverseCookiePath directive could fail to update correctly 
-     'domain=' or 'path=' in the 'Set-Cookie' header.  PR 61560.
-     [Christophe Jaillet]
-
-  *) mod_slotmem_shm: Add generation number to shm filename to fix races
-     with graceful restarts. PRs 62044 and 62308.  [Jim Jagielski, Yann Ylavic]
 
   *) mod_rewrite: Only create the global mutex used by "RewriteMap prg:" when
      this type of map is present in the configuration.  PR62311.  
@@ -55,12 +114,6 @@ Changes with Apache 2.5.1
   *) mod_ssl: Support loading certificates and private keys from the
      PKCS#11 OpenSSL engine.  [Anderson Sasaki <ansasaki redhat.com>,
      Joe Orton]
-
-  *) mod_proxy_html: Fix variable interpolation and memory allocation failure
-     in ProxyHTMLURLMap.  [Ewald Dieterich <ewald mailbox.org>]
-
-  *) core: In ONE_PROCESS/debug mode, cleanup everything when exiting.
-     [Yann Ylavic]
 
   *) mod_http2: adding an abort function to slave connections' pools, so out-of-memory
      events lead to a control process abort, as on HTTP/1.x connections. [Stefan Eissing]
@@ -88,7 +141,7 @@ Changes with Apache 2.5.1
      TLSv1.2 or lower ciphers are not relevant, as cipher suites are completely separate.
      This means there is a bit if a world split when simultaneously having TLSv1.2 and TLSv1.3
      connections to the same server.
-     [Stefan Eissing]
+     [Yann Ylavic, Stefan Eissing]
 
   *) mod_ssl: proper checks for libressl 2.07/8 and its TLSv1_3 support, see PR 62236.
      [Bernard Spil <brnrd@freebsd.org>]
@@ -317,10 +370,6 @@ Changes with Apache 2.5.0-alpha
      associated with an active connection in the "ACC" field. Previously
      zero was always reported with this MPM.  PR60647. [Eric Covener]
 
-  *) mod_remoteip: When overriding the useragent address from X-Forwarded-For,
-     zero out what had been initialized as the connection-level port.  PR59931.
-     [Hank Ibell <hwibell gmail.com>]
-
   *) mod_proxy_wstunnel: Reliably run before mod_proxy_http.
      [Eric Covener]
 
@@ -548,7 +597,9 @@ Changes with Apache 2.5.0-alpha
 
   *) mod_status, mod_echo: Fix the display of client addresses.
      They were truncated to 31 characters which is not enough for IPv6 addresses.
-     PR 54848 [Bernhard Schmidt <berni birkenwald de>]
+     This is done by deprecating the use of the 'client' field and using
+     the new 'client64' field in worker_score.
+     PR 54848 [Bernhard Schmidt <berni birkenwald de>, Jim Jagielski]
 
   *) core: merge AllowEncodedSlashes from the base configuration into
      virtual hosts. [Eric Covener]

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE modulesynopsis SYSTEM "../style/modulesynopsis.dtd">
 <?xml-stylesheet type="text/xsl" href="../style/manual.fr.xsl"?>
-<!-- English Revision: 1828648 -->
+<!-- English Revision: 1843670 -->
 <!-- French translation : Lucien GENTIS -->
 <!-- Reviewed by : Vincent Deffontaines -->
 
@@ -795,6 +795,42 @@ DefaultRuntimeDir scratch/
     <directive>DefaultRuntimeDir</directive> peut être modifiée en
     changeant la valeur de la macro <code>DEFAULT_REL_RUNTIMEDIR</code>
     définie à la compilation.</p>
+
+   <p>Note: si la valeur de <directive>ServerRoot</directive> n'a pas
+   été spécifiée avant d'utiliser cette directive, c'est la valeur par
+   défaut de <directive>ServerRoot</directive> qui sera utilisée pour
+   définir la base du répertoire.</p>
+
+</usage>
+<seealso>Voir les <a
+href="../misc/security_tips.html#serverroot">conseils à propos de
+sésurité</a> pour plus d'informations en vue de définir correctement les
+permissions sur la racine du serveur <directive>ServerRoot</directive></seealso>
+</directivesynopsis>
+
+<directivesynopsis>
+<name>DefaultStateDir</name>
+<description>Répertoire racine des fichiers d'état persistants</description>
+<syntax>DefaultStateDir <var>directory-path</var></syntax>
+<default>DefaultRuntimeDir DEFAULT_REL_STATEDIR (state/)</default>
+<contextlist><context>server config</context></contextlist>
+<compatibility>Disponible à partir de la version 2.5.1. du serveur HTTP Apache.</compatibility>
+
+<usage>
+    <p>La directive <directive>DefaultStateDir</directive> permet de définir le
+    répertoire dans lequel le serveur va créer divers fichiers d'état
+    persistants (bases de données, caches de longue durée, etc...). Si elle est
+    définie avec un chemin relatif, ce dernier sera accolé à la valeur de la
+    directive <directive>ServerRoot</directive>.</p>
+
+    <p><strong>Exemple</strong></p>
+   <highlight language="config">
+DefaultStateDir state/
+    </highlight>
+
+    <p>La valeur par défaut de <directive>DefaultStateDir</directive> peut être
+    modifiée en changeant la valeur de <code>DEFAULT_REL_STATEDIR</code>
+    #définie à la compilation.</p>
 
    <p>Note: si la valeur de <directive>ServerRoot</directive> n'a pas
    été spécifiée avant d'utiliser cette directive, c'est la valeur par
@@ -2221,7 +2257,7 @@ host</context>
 
 <highlight language="config">
 &lt;FilesMatch "^(?&lt;sitename&gt;[^/]+)"&gt;
-    require ldap-group cn=%{env:MATCH_SITENAME},ou=combined,o=Example
+    Require ldap-group cn=%{env:MATCH_SITENAME},ou=combined,o=Example
 &lt;/FilesMatch&gt;
 </highlight>    
 </usage>
@@ -2552,6 +2588,12 @@ existe au démarrage</description>
     <var>filename</var> sera relatif au répertoire racine par défaut du serveur
     ou au répertoire racine passé dans la ligne de commande via l'option
     <code>-d</code>.</p>
+
+    <note type="warning"><title>Avertissement</title>
+    Avec la version 2.4.34, il est interdit de spécifier un <var>filename</var>
+    entouré de guillemets. Ceci provoquerait une erreur de syntaxe au démarrage.
+    Il est donc impossible de spécifier des noms de fichiers contenant des
+    espaces, mais ce défaut a été corrigé à partir de la version 2.4.35.</note>
     
 </usage>
 </directivesynopsis>
@@ -3475,7 +3517,7 @@ host</context>
 
 <highlight language="config">
 &lt;LocationMatch "^/combined/(?&lt;sitename&gt;[^/]+)"&gt;
-    require ldap-group cn=%{env:MATCH_SITENAME},ou=combined,o=Example
+    Require ldap-group cn=%{env:MATCH_SITENAME},ou=combined,o=Example
 &lt;/LocationMatch&gt;
 </highlight>    
 </usage>
@@ -5676,5 +5718,44 @@ comme si la directive QualifyRedirectURL était définie à ON.</compatibility>
 </usage>
 </directivesynopsis>
 
+<directivesynopsis>
+<name>StrictHostCheck</name>
+<description>Détermine si le nom d'hôte contenu dans une requête doit être
+explicitement spécifié au niveau du serveur virtuel qui a pris en compte cette
+dernière.
+             </description>
+<syntax>StrictHostCheck ON|OFF</syntax>
+<default>StrictHostCheck OFF</default>
+<contextlist><context>server config</context><context>virtual host</context>
+</contextlist>
+<compatibility>Disponible à partir de la version 2.5.1 du serveur HTTP Apache.</compatibility>
+
+<usage>
+    <p>Par défaut, le serveur répond aux requêtes quel que soit le nom d'hôte
+    qu'elles contiennent, y compris un nom d'hôte non prévu dans la
+    configuration. Bien que cela soit pratique, il peut s'avérer souhaitable de
+    restreindre les noms d'hôte qu'une application sous-jacente devra prendre en
+    compte car elle va souvent générer des réponses en se référençant elle-même.</p>
+
+    <p>Si la directive <directive>StrictHostCheck</directive> est définie à
+    <em>ON</em>, le serveur générera une erreur HTTP 400 si le nom d'hôte que
+    contient la requête n'a pas été explicitement spécifié par une directive
+    <directive module="core">ServerName</directive> ou <directive
+    module="core">ServerAlias</directive> au niveau du serveur virtuel qui
+    correspond le mieux aux caractéristiques de la connexion entrante.</p>
+
+   <p>Cette directive permet aussi de rechercher une correspondance entre le nom
+   d'hôte de la requête et les noms d'hôte spécifiés au sein de la balise
+   ouvrante <directive module="core">VirtualHost</directive>. Il s'agit
+   cependant d'un mécanisme de configuration relativement obscur qui agit comme
+   une directive <directive module="core">ServerAlias</directive>
+   supplémentaire.</p>
+
+   <p>Cette directive n'a aucun effet dans les serveurs virtuels qui ne sont pas
+   des serveurs par défaut. La valeur héritée de la configuration globale du
+   serveur ou le serveur virtuel par défaut pour l'adresse IP/port de la
+   connexion sous-jacente déterminent la valeur effective.</p>
+</usage>
+</directivesynopsis>
 
 </modulesynopsis>

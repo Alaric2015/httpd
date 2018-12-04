@@ -821,8 +821,8 @@ static int dav_parse_range(request_rec *r,
 
     range = apr_pstrdup(r->pool, range_c);
     if (ap_cstr_casecmpn(range, "bytes ", 6) != 0
-        || (dash = ap_strchr(range, '-')) == NULL
-        || (slash = ap_strchr(range, '/')) == NULL) {
+        || (dash = ap_strchr(range + 6, '-')) == NULL
+        || (slash = ap_strchr(range + 6, '/')) == NULL) {
         /* malformed header */
         return -1;
     }
@@ -2059,9 +2059,9 @@ static dav_error * dav_propfind_walker(dav_walk_resource *wres, int calltype)
                                  : DAV_PROP_INSERT_NAME;
         propstats = dav_get_allprops(propdb, what);
     }
-    dav_close_propdb(propdb);
-
     dav_stream_response(wres, 0, &propstats, ctx->scratchpool);
+
+    dav_close_propdb(propdb);
 
     /* at this point, ctx->scratchpool has been used to stream a
        single response.  this function fully controls the pool, and
@@ -2160,6 +2160,7 @@ static int dav_method_propfind(request_rec *r)
     ctx.r = r;
     ctx.bb = apr_brigade_create(r->pool, r->connection->bucket_alloc);
     apr_pool_create(&ctx.scratchpool, r->pool);
+    apr_pool_tag(ctx.scratchpool, "mod_dav-scratch");
 
     /* ### should open read-only */
     if ((err = dav_open_lockdb(r, 0, &ctx.w.lockdb)) != NULL) {

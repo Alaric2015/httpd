@@ -49,6 +49,7 @@
 #include "scoreboard.h"
 #include "mod_core.h"
 #include "ap_listen.h"
+#include "core.h"
 
 #include "mod_so.h" /* for ap_find_loaded_module_symbol */
 
@@ -85,6 +86,7 @@ struct core_output_filter_ctx {
 };
 
 struct core_filter_ctx {
+    apr_bucket_brigade *bb;
     apr_bucket_brigade *tmpbb;
 };
 
@@ -93,7 +95,7 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
                                   ap_input_mode_t mode, apr_read_type_e block,
                                   apr_off_t readbytes)
 {
-    apr_status_t rv;
+    apr_status_t rv = APR_SUCCESS;
     core_net_rec *net = f->ctx;
     core_ctx_t *ctx = net->in_ctx;
     const char *str;
@@ -116,19 +118,22 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
     if (!ctx)
     {
         net->in_ctx = ctx = apr_palloc(f->c->pool, sizeof(*ctx));
-        ap_filter_prepare_brigade(f, NULL);
+        ctx->bb = apr_brigade_create(f->c->pool, f->c->bucket_alloc);
         ctx->tmpbb = apr_brigade_create(f->c->pool, f->c->bucket_alloc);
         /* seed the brigade with the client socket. */
-        rv = ap_run_insert_network_bucket(f->c, f->bb, net->client_socket);
+        rv = ap_run_insert_network_bucket(f->c, ctx->bb, net->client_socket);
         if (rv != APR_SUCCESS)
             return rv;
     }
-    else if (APR_BRIGADE_EMPTY(f->bb)) {
-        return APR_EOF;
+    else {
+        ap_filter_reinstate_brigade(f, ctx->bb, NULL);
+        if (APR_BRIGADE_EMPTY(ctx->bb)) {
+            return APR_EOF;
+        }
     }
 
     /* ### This is bad. */
-    BRIGADE_NORMALIZE(f->bb);
+    BRIGADE_NORMALIZE(ctx->bb);
 
     /* check for empty brigade again *AFTER* BRIGADE_NORMALIZE()
      * If we have lost our socket bucket (see above), we are EOF.
@@ -136,13 +141,13 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
      * Ideally, this should be returning SUCCESS with EOS bucket, but
      * some higher-up APIs (spec. read_request_line via ap_rgetline)
      * want an error code. */
-    if (APR_BRIGADE_EMPTY(f->bb)) {
+    if (APR_BRIGADE_EMPTY(ctx->bb)) {
         return APR_EOF;
     }
 
     if (mode == AP_MODE_GETLINE) {
         /* we are reading a single LF line, e.g. the HTTP headers */
-        rv = apr_brigade_split_line(b, f->bb, block, HUGE_STRING_LEN);
+        rv = apr_brigade_split_line(b, ctx->bb, block, HUGE_STRING_LEN);
         /* We should treat EAGAIN here the same as we do for EOF (brigade is
          * empty).  We do this by returning whatever we have read.  This may
          * or may not be bogus, but is consistent (for now) with EOF logic.
@@ -150,7 +155,7 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
         if (APR_STATUS_IS_EAGAIN(rv) && block == APR_NONBLOCK_READ) {
             rv = APR_SUCCESS;
         }
-        return rv;
+        goto cleanup;
     }
 
     /* ### AP_MODE_PEEK is a horrific name for this mode because we also
@@ -170,15 +175,16 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
          * mean that there is another request, just a blank line.
          */
         while (1) {
-            if (APR_BRIGADE_EMPTY(f->bb))
-                return APR_EOF;
+            if (APR_BRIGADE_EMPTY(ctx->bb)) {
+                rv = APR_EOF;
+                goto cleanup;
+            }
 
-            e = APR_BRIGADE_FIRST(f->bb);
-
+            e = APR_BRIGADE_FIRST(ctx->bb);
             rv = apr_bucket_read(e, &str, &len, APR_NONBLOCK_READ);
-
-            if (rv != APR_SUCCESS)
-                return rv;
+            if (rv != APR_SUCCESS) {
+                goto cleanup;
+            }
 
             c = str;
             while (c < str + len) {
@@ -187,7 +193,7 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
                 else if (*c == APR_ASCII_CR && *(c + 1) == APR_ASCII_LF)
                     c += 2;
                 else
-                    return APR_SUCCESS;
+                    goto cleanup;
             }
 
             /* If we reach here, we were a bucket just full of CRLFs, so
@@ -195,7 +201,9 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
             /* FIXME: Is this the right thing to do in the core? */
             apr_bucket_delete(e);
         }
-        return APR_SUCCESS;
+
+        /* UNREACHABLE */
+        ap_assert(0);
     }
 
     /* If mode is EXHAUSTIVE, we want to just read everything until the end
@@ -212,7 +220,7 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
         apr_bucket *e;
 
         /* Tack on any buckets that were set aside. */
-        APR_BRIGADE_CONCAT(b, f->bb);
+        APR_BRIGADE_CONCAT(b, ctx->bb);
 
         /* Since we've just added all potential buckets (which will most
          * likely simply be the socket bucket) we know this is the end,
@@ -221,7 +229,9 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
          * must be EOS. */
         e = apr_bucket_eos_create(f->c->bucket_alloc);
         APR_BRIGADE_INSERT_TAIL(b, e);
-        return APR_SUCCESS;
+
+        rv = APR_SUCCESS;
+        goto cleanup;
     }
 
     /* read up to the amount they specified. */
@@ -230,16 +240,15 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
 
         AP_DEBUG_ASSERT(readbytes > 0);
 
-        e = APR_BRIGADE_FIRST(f->bb);
+        e = APR_BRIGADE_FIRST(ctx->bb);
         rv = apr_bucket_read(e, &str, &len, block);
-
-        if (APR_STATUS_IS_EAGAIN(rv) && block == APR_NONBLOCK_READ) {
-            /* getting EAGAIN for a blocking read is an error; for a
-             * non-blocking read, return an empty brigade. */
-            return APR_SUCCESS;
-        }
-        else if (rv != APR_SUCCESS) {
-            return rv;
+        if (rv != APR_SUCCESS) {
+            if (APR_STATUS_IS_EAGAIN(rv) && block == APR_NONBLOCK_READ) {
+                /* getting EAGAIN for a blocking read is an error; not for a
+                 * non-blocking read, return an empty brigade. */
+                rv = APR_SUCCESS;
+            }
+            goto cleanup;
         }
         else if (block == APR_BLOCK_READ && len == 0) {
             /* We wanted to read some bytes in blocking mode.  We read
@@ -247,7 +256,7 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
              *
              * When we are in normal mode, return an EOS bucket to the
              * caller.
-             * When we are in speculative mode, leave ctx->b empty, so
+             * When we are in speculative mode, leave ctx->bb empty, so
              * that the next call returns an EOS bucket.
              */
             apr_bucket_delete(e);
@@ -256,18 +265,17 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
                 e = apr_bucket_eos_create(f->c->bucket_alloc);
                 APR_BRIGADE_INSERT_TAIL(b, e);
             }
-            return APR_SUCCESS;
+            goto cleanup;
         }
 
         /* Have we read as much data as we wanted (be greedy)? */
         if (len < readbytes) {
             apr_size_t bucket_len;
 
-            rv = APR_SUCCESS;
             /* We already registered the data in e in len */
             e = APR_BUCKET_NEXT(e);
             while ((len < readbytes) && (rv == APR_SUCCESS)
-                   && (e != APR_BRIGADE_SENTINEL(f->bb))) {
+                   && (e != APR_BRIGADE_SENTINEL(ctx->bb))) {
                 /* Check for the availability of buckets with known length */
                 if (e->length != -1) {
                     len += e->length;
@@ -295,36 +303,39 @@ apr_status_t ap_core_input_filter(ap_filter_t *f, apr_bucket_brigade *b,
             readbytes = len;
         }
 
-        rv = apr_brigade_partition(f->bb, readbytes, &e);
+        rv = apr_brigade_partition(ctx->bb, readbytes, &e);
         if (rv != APR_SUCCESS) {
-            return rv;
+            goto cleanup;
         }
 
         /* Must do move before CONCAT */
-        ctx->tmpbb = apr_brigade_split_ex(f->bb, e, ctx->tmpbb);
+        ctx->tmpbb = apr_brigade_split_ex(ctx->bb, e, ctx->tmpbb);
 
         if (mode == AP_MODE_READBYTES) {
-            APR_BRIGADE_CONCAT(b, f->bb);
+            APR_BRIGADE_CONCAT(b, ctx->bb);
         }
         else if (mode == AP_MODE_SPECULATIVE) {
             apr_bucket *copy_bucket;
 
-            for (e = APR_BRIGADE_FIRST(f->bb);
-                 e != APR_BRIGADE_SENTINEL(f->bb);
+            for (e = APR_BRIGADE_FIRST(ctx->bb);
+                 e != APR_BRIGADE_SENTINEL(ctx->bb);
                  e = APR_BUCKET_NEXT(e))
             {
                 rv = apr_bucket_copy(e, &copy_bucket);
                 if (rv != APR_SUCCESS) {
-                    return rv;
+                    goto cleanup;
                 }
                 APR_BRIGADE_INSERT_TAIL(b, copy_bucket);
             }
         }
 
-        /* Take what was originally there and place it back on ctx->b */
-        APR_BRIGADE_CONCAT(f->bb, ctx->tmpbb);
+        /* Take what was originally there and place it back on ctx->bb */
+        APR_BRIGADE_CONCAT(ctx->bb, ctx->tmpbb);
     }
-    return APR_SUCCESS;
+
+cleanup:
+    ap_filter_adopt_brigade(f, ctx->bb);
+    return rv;
 }
 
 static apr_status_t send_brigade_nonblocking(apr_socket_t *s,
@@ -425,8 +436,13 @@ apr_status_t ap_core_output_filter(ap_filter_t *f, apr_bucket_brigade *bb)
         ap_log_cerror(
                 APLOG_MARK, APLOG_TRACE1, rv, c,
                 "core_output_filter: writing data to the network");
-        apr_brigade_cleanup(bb);
+        /*
+         * Set c->aborted before apr_brigade_cleanup to have the correct status
+         * when logging the request as apr_brigade_cleanup triggers the logging
+         * of the request if it contains an EOR bucket.
+         */
         c->aborted = 1;
+        apr_brigade_cleanup(bb);
         return rv;
     }
 

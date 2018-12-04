@@ -588,15 +588,35 @@
  * 20180720.1 (2.5.1-dev)  Axe data_in_{in,out}put_filter from conn_rec.
  * 20180720.2 (2.5.1-dev)  Add optional function declaration for
  *                         ap_proxy_balancer_get_best_worker to mod_proxy.h.
- *
+ * 20180720.3 (2.5.1-dev)  Add client64 to worker_share
+ * 20180720.4 (2.5.1-dev)  Add new duration field to worker_score struct in
+ *                         scoreboard.h
+ * 20180720.5 (2.5.1-dev)  Add new ap_update_global_status() method and
+ *                         times field in the global_score structure in
+ *                         scoreboard.h.
+ * 20180720.6 (2.5.1-dev)  add strict_host_check to core_server_conf
+ * 20180720.7 (2.5.1-dev)  worker_share struct re-organized
+ * 20180902.1 (2.5.1-dev)  Split conn_rec pending_filters in two rings,
+ *                         pending_input_filters and pending_output_filters
+ * 20180903.1 (2.5.1-dev)  Replace conn_rec pending_{in,out}put_filters by
+ *                         filter_conn_ctx, remove argument pool from
+ *                         ap_filter_prepare_brigade()
+ * 20180903.2 (2.5.1-dev)  Add ap_filter_recycle()
+ * 20180905.1 (2.5.1-dev)  Axe ap_reuse_brigade_from_pool(), replaced by
+ *                         ap_acquire_brigade()/ap_release_brigade(), and
+ *                         in ap_filter_t replace pending/bb/deferred_pool
+ *                         fields by struct ap_filter_private *priv
+ * 20180906.1 (2.5.1-dev)  Don't export ap_filter_recycle() anymore
+ * 20180906.2 (2.5.1-dev)  Add ap_state_dir_relative()
+ * 20180906.3 (2.5.1-dev)  Add ap_dir_nofnmatch() and ap_dir_fnmatch().
  */
 
 #define MODULE_MAGIC_COOKIE 0x41503235UL /* "AP25" */
 
 #ifndef MODULE_MAGIC_NUMBER_MAJOR
-#define MODULE_MAGIC_NUMBER_MAJOR 20180720
+#define MODULE_MAGIC_NUMBER_MAJOR 20180906
 #endif
-#define MODULE_MAGIC_NUMBER_MINOR 2                 /* 0...n */
+#define MODULE_MAGIC_NUMBER_MINOR 3                 /* 0...n */
 
 /**
  * Determine if the server's current MODULE_MAGIC_NUMBER is at least a

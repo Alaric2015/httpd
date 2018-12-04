@@ -612,7 +612,6 @@ static apr_status_t hc_check_tcp(baton_t *baton)
 
     status = hc_get_backend("HCTCP", &backend, hc, ctx, baton->ptemp);
     if (status == OK) {
-        backend->addr = hc->cp->addr;
         status = ap_proxy_connect_backend("HCTCP", backend, hc, ctx->s);
         /* does an unconditional ap_proxy_is_socket_connected() */
     }
@@ -831,6 +830,7 @@ static void * APR_THREAD_FUNC hc_check(apr_thread_t *thread, void *b)
                  "%sHealth checking %s", (thread ? "Threaded " : ""),
                  worker->s->name);
 
+    worker->s->updated = now;
     if (hc->s->method == TCP) {
         rv = hc_check_tcp(baton);
     }
@@ -871,7 +871,6 @@ static void * APR_THREAD_FUNC hc_check(apr_thread_t *thread, void *b)
             }
         }
     }
-    worker->s->updated = now;
     apr_pool_destroy(baton->ptemp);
     return NULL;
 }

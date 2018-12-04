@@ -255,6 +255,7 @@
 <li><a href="mod_autoindex.html#defaulticon">DefaultIcon</a></li>
 <li><a href="mod_mime.html#defaultlanguage">DefaultLanguage</a></li>
 <li><a href="core.html#defaultruntimedir">DefaultRuntimeDir</a></li>
+<li><a href="core.html#defaultstatedir">DefaultStateDir</a></li>
 <li><a href="core.html#defaulttype">DefaultType</a></li>
 <li><a href="core.html#define">Define</a></li>
 <li><a href="mod_deflate.html#deflatealteretag">DeflateAlterETag</a></li>
@@ -739,6 +740,7 @@
 <li><a href="mod_ssl.html#sslverifydepth">SSLVerifyDepth</a></li>
 <li><a href="mpm_common.html#startservers">StartServers</a></li>
 <li><a href="mpm_common.html#startthreads">StartThreads</a></li>
+<li><a href="core.html#stricthostcheck">StrictHostCheck</a></li>
 <li><a href="mod_substitute.html#substitute">Substitute</a></li>
 <li><a href="mod_substitute.html#substituteinheritbefore">SubstituteInheritBefore</a></li>
 <li><a href="mod_substitute.html#substitutemaxlinelength">SubstituteMaxLineLength</a></li>

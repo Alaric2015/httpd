@@ -1808,10 +1808,7 @@ int ap_proxy_http_process_response(proxy_http_req_t *req)
         }
 
         /* send body - but only if a body is expected */
-        if ((!r->header_only) &&                   /* not HEAD request */
-            (proxy_status != HTTP_NO_CONTENT) &&      /* not 204 */
-            (proxy_status != HTTP_NOT_MODIFIED)) {    /* not 304 */
-
+        if (!r->header_only && !AP_STATUS_IS_HEADER_ONLY(proxy_status)) {
             /* We need to copy the output headers and treat them as input
              * headers as well.  BUT, we need to do this before we remove
              * TE, so that they are preserved accordingly for
@@ -2141,15 +2138,14 @@ static int proxy_http_handler(request_rec *r, proxy_worker *worker,
          * req->expecting_100 (i.e. cleared only if mod_proxy_http sent the
          * "100 Continue" according to its policy).
          */
-        req->do_100_continue = 1;
+        req->do_100_continue = req->flushall = 1;
         req->expecting_100 = r->expecting_100;
         r->expecting_100 = 0;
     }
-
     /* Should we block while prefetching the body or try nonblocking and flush
      * data to the backend ASAP?
      */
-    if (apr_table_get(r->subprocess_env, "proxy-flushall")) {
+    else if (apr_table_get(r->subprocess_env, "proxy-flushall")) {
         req->flushall = 1;
     }
 
